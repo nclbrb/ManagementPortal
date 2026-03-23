@@ -1,0 +1,660 @@
+{
+  "employees": [
+    {
+      "id": "665911a7-c778-4d40-b59d-f6c1d16c58fb",
+      "name": "Nicole Borabo",
+      "position": "Comelec Staff",
+      "type": "full-time",
+      "department": "COMELEC"
+    },
+    {
+      "id": "8cfe16f6-bdd0-456f-a751-547d6e1196f3",
+      "name": "Andrei Asnan",
+      "position": "Comelec Staff",
+      "type": "part-time",
+      "department": "COMELEC"
+    },
+    {
+      "id": "48122f2c-84c5-46b1-a975-396facbbd88b",
+      "name": "Hyunjin Hwang ",
+      "position": "Comelec Staff",
+      "type": "full-time",
+      "department": "COMELEC"
+    }
+  ],
+  "events": [],
+  "obSlips": [
+    {
+      "id": "8b202edb-22f7-44c8-951f-f7eef950e7de",
+      "date": "2026-03-23",
+      "name": "Nicole Borabo",
+      "position": "Comelec Staff",
+      "department": "COMELEC",
+      "purpose": "Bumili ng Buko Juice ni Andrei",
+      "timeIn": "08:00",
+      "timeOut": "17:00",
+      "createdAt": "2026-03-23T13:57:22.827Z"
+    },
+    {
+      "id": "07e721ba-c8e9-478e-8dc3-5e6f39efd15e",
+      "date": "2026-03-23",
+      "name": "Andrei Asnan",
+      "position": "Dancer ng Comelec",
+      "department": "COMELEC",
+      "purpose": "Badingan sa Jollibee",
+      "timeIn": "08:00",
+      "timeOut": "17:00",
+      "createdAt": "2026-03-23T13:57:22.827Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "title": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "currentStage": 4,
+      "updates": [
+        {
+          "stage": 0,
+          "status": "done",
+          "assignedStaff": "Nicole Borabo",
+          "note": "Voter's Registration",
+          "at": "2026-03-23T13:42:58.584Z"
+        },
+        {
+          "stage": 1,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:43:08.872Z"
+        },
+        {
+          "stage": 2,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:43:14.507Z"
+        },
+        {
+          "stage": 3,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:45:55.544Z"
+        },
+        {
+          "stage": 4,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:46:03.847Z"
+        }
+      ]
+    },
+    {
+      "id": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "title": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "currentStage": 5,
+      "updates": [
+        {
+          "stage": 0,
+          "status": "done",
+          "assignedStaff": "Nicole Borabo",
+          "note": "Voter's Registration",
+          "at": "2026-03-23T13:49:33.048Z"
+        },
+        {
+          "stage": 1,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:50:44.320Z"
+        },
+        {
+          "stage": 2,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:50:52.551Z"
+        },
+        {
+          "stage": 3,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:50:55.071Z"
+        },
+        {
+          "stage": 4,
+          "status": "in-progress",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:50:56.743Z"
+        },
+        {
+          "stage": 5,
+          "status": "done",
+          "assignedStaff": "Nicole Borabo",
+          "note": "",
+          "at": "2026-03-23T13:51:01.062Z"
+        }
+      ]
+    },
+    {
+      "id": "66aae52a-dbde-4d1d-aae0-542cf16acb81",
+      "title": "2026-03-26",
+      "batchDate": "2026-03-26",
+      "currentStage": 0,
+      "updates": [
+        {
+          "stage": 0,
+          "status": "done",
+          "assignedStaff": "",
+          "note": "",
+          "at": "2026-03-23T14:10:18.410Z"
+        }
+      ]
+    }
+  ],
+  "taskLogs": [
+    {
+      "id": "0cd938f3-ce0c-40b2-aa47-ba76e5b17a5e",
+      "at": "2026-03-23T13:26:53.880Z",
+      "action": "batch-deleted",
+      "taskId": "8fd0b15e-09b8-4b20-947e-66e5521976c6",
+      "batchTitle": "Batch A-001",
+      "batchDate": "2026-03-22",
+      "details": {}
+    },
+    {
+      "id": "ef72d454-b901-45a3-8aa3-6d759300c802",
+      "at": "2026-03-23T13:27:26.287Z",
+      "action": "batch-created",
+      "taskId": "401df9d0-8d7e-431e-8500-e32e92eb284b",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "5466ccc0-8a02-42e4-be6f-fce7132b1cea",
+      "at": "2026-03-23T13:28:27.740Z",
+      "action": "stage-updated",
+      "taskId": "401df9d0-8d7e-431e-8500-e32e92eb284b",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": "Done with Verification"
+      }
+    },
+    {
+      "id": "00bf29d0-76fd-431b-ba63-a9b433072448",
+      "at": "2026-03-23T13:30:28.909Z",
+      "action": "stage-updated",
+      "taskId": "401df9d0-8d7e-431e-8500-e32e92eb284b",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Andrei Asnan",
+        "note": ""
+      }
+    },
+    {
+      "id": "99f80052-9f77-4c3e-b08e-afd06415e107",
+      "at": "2026-03-23T13:30:56.850Z",
+      "action": "batch-deleted",
+      "taskId": "401df9d0-8d7e-431e-8500-e32e92eb284b",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {}
+    },
+    {
+      "id": "623738d2-f65e-4d2a-868a-2ba52722f07c",
+      "at": "2026-03-23T13:31:09.033Z",
+      "action": "batch-created",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "ce547509-23aa-43e9-99d5-8e3f88186cb5",
+      "at": "2026-03-23T13:31:17.865Z",
+      "action": "stage-updated",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "0ebf2aa8-6e3b-4a28-bf92-89cf48b4276e",
+      "at": "2026-03-23T13:31:39.017Z",
+      "action": "stage-updated",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "0c9a69de-b897-4f3f-b901-df11ccb37532",
+      "at": "2026-03-23T13:33:06.809Z",
+      "action": "stage-updated",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 3,
+        "stageLabel": "Organized by Precinct (Alphabetical)",
+        "assignedStaff": "Andrei Asnan",
+        "note": ""
+      }
+    },
+    {
+      "id": "2c9d2cc7-7d25-47b3-bd15-8bd3b427303b",
+      "at": "2026-03-23T13:33:15.824Z",
+      "action": "stage-updated",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 4,
+        "stageLabel": "For Approval",
+        "assignedStaff": "Andrei Asnan",
+        "note": ""
+      }
+    },
+    {
+      "id": "92a18818-abf5-4fb8-8347-8a2c7ffd1f7e",
+      "at": "2026-03-23T13:33:20.601Z",
+      "action": "stage-updated",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 5,
+        "stageLabel": "Final Filing",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "70ca4912-d4ee-4600-a5dd-61bd005e7012",
+      "at": "2026-03-23T13:35:48.584Z",
+      "action": "batch-deleted",
+      "taskId": "ef7be235-b775-494c-8138-6463f983db28",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {}
+    },
+    {
+      "id": "daa12a8e-2881-40e7-b6ed-70900b930e83",
+      "at": "2026-03-23T13:36:06.936Z",
+      "action": "batch-created",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "628dbda4-68b6-4d06-8349-5acfe3b40846",
+      "at": "2026-03-23T13:36:14.944Z",
+      "action": "stage-updated",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "9878a12e-57cc-450f-9b86-28a25a29e384",
+      "at": "2026-03-23T13:36:22.903Z",
+      "action": "stage-updated",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Andrei Asnan",
+        "note": ""
+      }
+    },
+    {
+      "id": "16c8c80e-8f09-4e95-8c1d-2514b7352fdf",
+      "at": "2026-03-23T13:36:27.494Z",
+      "action": "stage-updated",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 3,
+        "stageLabel": "Organized by Precinct (Alphabetical)",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "663284f6-ef0f-43ef-8ed5-6d216875099f",
+      "at": "2026-03-23T13:36:32.807Z",
+      "action": "stage-updated",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 4,
+        "stageLabel": "For Approval",
+        "assignedStaff": "Andrei Asnan",
+        "note": ""
+      }
+    },
+    {
+      "id": "e8b2cff6-075a-4d87-963e-9c68df74417c",
+      "at": "2026-03-23T13:36:45.237Z",
+      "action": "stage-updated",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 5,
+        "stageLabel": "Final Filing",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "62748a6d-69f9-4178-a24a-baabf3b23cfa",
+      "at": "2026-03-23T13:40:46.282Z",
+      "action": "batch-created",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "01b82237-bad4-45a4-a3f4-a3a6c790dbfe",
+      "at": "2026-03-23T13:40:55.876Z",
+      "action": "stage-updated",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "6f543729-83c3-4f69-a0a1-8a621919bf54",
+      "at": "2026-03-23T13:41:01.548Z",
+      "action": "stage-updated",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "84a29059-377e-48ad-a88c-830656fdd066",
+      "at": "2026-03-23T13:41:12.971Z",
+      "action": "stage-updated",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 3,
+        "stageLabel": "Organized by Precinct (Alphabetical)",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "d6a04e84-4d6f-473d-ba56-a670916d8f38",
+      "at": "2026-03-23T13:41:22.590Z",
+      "action": "stage-updated",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 4,
+        "stageLabel": "For Approval",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "f989f7b2-bced-4ef4-97f4-79472f3bb856",
+      "at": "2026-03-23T13:41:31.507Z",
+      "action": "stage-updated",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 5,
+        "stageLabel": "Final Filing",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "f8095f1b-3391-4cc7-9b8c-fa403fc2c619",
+      "at": "2026-03-23T13:42:43.570Z",
+      "action": "batch-deleted",
+      "taskId": "8d892a55-2cec-4cfc-a731-7f5da49fb9ce",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {}
+    },
+    {
+      "id": "0e9c87b5-c67b-4c14-a84e-969663388752",
+      "at": "2026-03-23T13:42:45.478Z",
+      "action": "batch-deleted",
+      "taskId": "f0415b5c-f0a6-46ef-b20c-861af91c5eeb",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {}
+    },
+    {
+      "id": "194c5350-d0fc-48bd-ac9b-d4b56fdb59c1",
+      "at": "2026-03-23T13:42:58.584Z",
+      "action": "batch-created",
+      "taskId": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "bf2920f4-f34d-49ab-b13f-6ab83641b96a",
+      "at": "2026-03-23T13:43:08.872Z",
+      "action": "stage-updated",
+      "taskId": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "988c73bf-15c9-4542-8393-8846c13bf8cb",
+      "at": "2026-03-23T13:43:14.507Z",
+      "action": "stage-updated",
+      "taskId": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "59d7bf87-b570-4f1e-a39b-2220445ba19a",
+      "at": "2026-03-23T13:45:55.544Z",
+      "action": "stage-updated",
+      "taskId": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 3,
+        "stageLabel": "Organized by Precinct (Alphabetical)",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "59b0dd6f-88da-432d-a3b3-1904c55c1286",
+      "at": "2026-03-23T13:46:03.847Z",
+      "action": "stage-updated",
+      "taskId": "149026a1-3cd3-4899-b432-812186ca60e5",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-23",
+      "details": {
+        "stage": 4,
+        "stageLabel": "For Approval",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "05146179-3549-4971-8726-eecd320f1694",
+      "at": "2026-03-23T13:49:33.048Z",
+      "action": "batch-created",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-23",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 0
+      }
+    },
+    {
+      "id": "31d26901-8601-47d3-a75a-cb25519c9d4b",
+      "at": "2026-03-23T13:50:19.803Z",
+      "action": "batch-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "title": "2026-03-24",
+        "batchDate": "2026-03-24"
+      }
+    },
+    {
+      "id": "6daa215e-e433-4dbf-ba46-3ffb5caaf6eb",
+      "at": "2026-03-23T13:50:44.320Z",
+      "action": "stage-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 1,
+        "stageLabel": "For Verification",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "a13f2493-0b1f-4279-82fa-02f599846c99",
+      "at": "2026-03-23T13:50:52.551Z",
+      "action": "stage-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 2,
+        "stageLabel": "For Correction",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "dc797b17-46e5-47a2-8ee1-8ecf7585c84a",
+      "at": "2026-03-23T13:50:55.071Z",
+      "action": "stage-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 3,
+        "stageLabel": "Organized by Precinct (Alphabetical)",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "bcd56c14-04e7-4aeb-a83c-a1b1c1213899",
+      "at": "2026-03-23T13:50:56.743Z",
+      "action": "stage-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 4,
+        "stageLabel": "For Approval",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "6001eb6b-1e42-4859-80dd-a427a35b3783",
+      "at": "2026-03-23T13:51:01.062Z",
+      "action": "stage-updated",
+      "taskId": "cea67ba3-87a8-4d40-8697-b9d1d20370b3",
+      "batchTitle": "2026-03-24",
+      "batchDate": "2026-03-24",
+      "details": {
+        "stage": 5,
+        "stageLabel": "Final Filing",
+        "assignedStaff": "Nicole Borabo",
+        "note": ""
+      }
+    },
+    {
+      "id": "82db1832-7dca-4e1d-8774-44ad9dffde54",
+      "at": "2026-03-23T14:10:18.410Z",
+      "action": "batch-created",
+      "taskId": "66aae52a-dbde-4d1d-aae0-542cf16acb81",
+      "batchTitle": "2026-03-26",
+      "batchDate": "2026-03-26",
+      "details": {
+        "stage": 0
+      }
+    }
+  ]
+}
