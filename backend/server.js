@@ -2,8 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
-const { Low } = require("lowdb");
-const { JSONFile } = require("lowdb/node");
+const { initSqlite, loadState, saveState, migrateFromJsonIfEmpty } = require("./sqlite-store");
 const dayjs = require("dayjs");
 const Holidays = require("date-holidays");
 const multer = require("multer");
@@ -51,7 +50,8 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 4000;
-const DB_PATH = path.join(__dirname, "data.json");
+const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "comelec.db");
+const LEGACY_JSON_PATH = path.join(__dirname, "data.json");
 const uploadsDir = path.join(__dirname, "uploads");
 const upload = multer({ dest: uploadsDir });
 
@@ -68,16 +68,30 @@ const taskStages = [
   "Final Filing",
 ];
 
-const adapter = new JSONFile(DB_PATH);
-const db = new Low(adapter, {
-  employees: [],
-  events: [],
-  obSlips: [],
-  tasks: [],
-  taskLogs: [],
-  users: [],
-  sessions: [],
-});
+const db = {
+  data: {
+    employees: [],
+    events: [],
+    obSlips: [],
+    tasks: [],
+    taskLogs: [],
+    users: [],
+    sessions: [],
+  },
+  async read() {
+    const s = loadState();
+    this.data.employees = s.employees;
+    this.data.events = s.events;
+    this.data.obSlips = s.obSlips;
+    this.data.tasks = s.tasks;
+    this.data.taskLogs = s.taskLogs;
+    this.data.users = s.users;
+    this.data.sessions = s.sessions;
+  },
+  async write() {
+    saveState(this.data);
+  },
+};
 
 function todayDate() {
   return dayjs().format("YYYY-MM-DD");
@@ -203,6 +217,8 @@ async function requireAuth(req, res, next) {
 
 async function bootstrap() {
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+  initSqlite(SQLITE_PATH);
+  migrateFromJsonIfEmpty(LEGACY_JSON_PATH);
   await db.read();
   db.data ||= { employees: [], events: [], obSlips: [], tasks: [], taskLogs: [], users: [], sessions: [] };
   db.data.taskLogs ||= [];
