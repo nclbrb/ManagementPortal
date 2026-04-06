@@ -1,4 +1,4 @@
 {
-  "ignore": ["data.json", "uploads/**", "*.log", "node_modules/**"],
+  "ignore": ["data.json", "comelec.db", "comelec.db-wal", "comelec.db-shm", "uploads/**", "*.log", "node_modules/**"],
   "ext": "js,json"
 }
