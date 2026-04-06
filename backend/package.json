@@ -13,6 +13,7 @@
   "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.6",
+    "date-holidays": "^3.26.12",
     "dayjs": "^1.11.20",
     "express": "^5.2.1",
     "lowdb": "^7.0.1",

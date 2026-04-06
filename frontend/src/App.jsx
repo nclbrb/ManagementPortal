@@ -1,12 +1,133 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import dayjs from "dayjs";
-import { SOCKET_URL, apiUrl } from "./apiConfig.js";
+import { SOCKET_URL, apiUrl, AUTH_STORAGE_KEY, getAuthHeaders } from "./apiConfig.js";
 
-async function jsonFetch(url) {
-  const r = await fetch(url);
+async function jsonFetch(url, options = {}) {
+  const r = await fetch(url, {
+    ...options,
+    headers: { ...getAuthHeaders(), ...options.headers },
+  });
+  if (r.status === 401) {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    throw new Error("UNAUTHORIZED");
+  }
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
+}
+
+function AuthGate({ mode, setMode, email, setEmail, password, setPassword, name, setName, error, setError, busy, setBusy, onAuthed }) {
+  const submitLogin = async (e) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const r = await fetch(apiUrl("/auth/login"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setError(data.error || "Sign-in failed.");
+        return;
+      }
+      onAuthed(data.user, data.token);
+    } catch {
+      setError("Cannot reach the server. Start the backend and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitSignup = async (e) => {
+    e.preventDefault();
+    setError("");
+    setBusy(true);
+    try {
+      const r = await fetch(apiUrl("/auth/signup"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, name }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setError(data.error || "Sign-up failed.");
+        return;
+      }
+      onAuthed(data.user, data.token);
+    } catch {
+      setError("Cannot reach the server. Start the backend and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-gate">
+      <div className="auth-gate-card">
+        <header className="auth-gate-head">
+          <span className="auth-gate-badge">COMELEC</span>
+          <h1>Management portal</h1>
+          <p>Sign in to access tasks, OB slips, calendar, and staff records.</p>
+        </header>
+        <div className="auth-gate-tabs">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>
+            Log in
+          </button>
+          <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>
+            Sign up
+          </button>
+        </div>
+        {mode === "login" ? (
+          <form className="auth-gate-form" onSubmit={submitLogin}>
+            <label>
+              Email
+              <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </label>
+            <label>
+              Password
+              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+            </label>
+            {error ? <p className="form-error auth-gate-error">{error}</p> : null}
+            <button type="submit" className="auth-gate-submit" disabled={busy}>
+              {busy ? "Signing in…" : "Log in"}
+            </button>
+          </form>
+        ) : (
+          <form className="auth-gate-form" onSubmit={submitSignup}>
+            <label>
+              Display name
+              <input type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Juan Dela Cruz" />
+            </label>
+            <label>
+              Email
+              <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            </label>
+            <label>
+              Password
+              <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+            </label>
+            <p className="auth-gate-hint">Password must be at least 6 characters.</p>
+            {error ? <p className="form-error auth-gate-error">{error}</p> : null}
+            <button type="submit" className="auth-gate-submit" disabled={busy}>
+              {busy ? "Creating account…" : "Create account"}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function staffInitials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts[0]) return parts[0].slice(0, 2).toUpperCase();
+  return "?";
 }
 
 function escapeHtml(str) {
@@ -204,6 +325,37 @@ function buildObSlipPrintHtml(slip) {
 </html>`;
 }
 const tabs = ["Dashboard", "Task Tracker", "OB Slip", "Calendar", "Employees"];
+
+const COMELEC_NAV_KEY = "comelec_nav_v1";
+
+function readStoredNav() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(COMELEC_NAV_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    return o && typeof o === "object" ? o : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNav(o) {
+  if (!o || typeof o !== "object") return null;
+  const tab = tabs.includes(o.tab) ? o.tab : "Dashboard";
+  return {
+    tab,
+    taskPage: o.taskPage === "detail" || o.taskPage === "list" ? o.taskPage : "list",
+    selectedTaskId: typeof o.selectedTaskId === "string" ? o.selectedTaskId : null,
+    obPage: o.obPage === "detail" || o.obPage === "list" ? o.obPage : "list",
+    selectedObSlipId: typeof o.selectedObSlipId === "string" ? o.selectedObSlipId : null,
+    employeePage: o.employeePage === "detail" || o.employeePage === "list" ? o.employeePage : "list",
+    selectedEmployeeId: typeof o.selectedEmployeeId === "string" ? o.selectedEmployeeId : null,
+  };
+}
+
+const initialAppNav = typeof window !== "undefined" ? normalizeNav(readStoredNav()) : null;
+
 const iconProps = {
   viewBox: "0 0 24 24",
   fill: "none",
@@ -259,7 +411,16 @@ const tabIcons = {
   ),
 };
 
-function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dashboardRecent, events, onNavigate }) {
+function DashboardSection({
+  dashboard,
+  dashboardSearch,
+  setDashboardSearch,
+  dashboardRecent,
+  events,
+  holidays = [],
+  employees = [],
+  onNavigate,
+}) {
   const todayYmd = dayjs().format("YYYY-MM-DD");
   const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
   const [selectedDate, setSelectedDate] = useState(todayYmd);
@@ -290,7 +451,34 @@ function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dash
     return m;
   }, [events, ym]);
 
+  const holidaysByDate = useMemo(() => {
+    const m = {};
+    for (const h of holidays) {
+      if (!h?.date?.startsWith(ym)) continue;
+      (m[h.date] ||= []).push(h);
+    }
+    return m;
+  }, [holidays, ym]);
+
+  const birthdaysByDate = useMemo(() => {
+    const m = {};
+    const year = dayjs(`${ym}-01`).year();
+    for (const emp of employees) {
+      if (!emp.birthday || !/^\d{4}-\d{2}-\d{2}$/.test(emp.birthday)) continue;
+      const bd = dayjs(emp.birthday);
+      if (!bd.isValid()) continue;
+      const occ = dayjs(`${year}-${bd.format("MM-DD")}`);
+      if (!occ.isValid()) continue;
+      const key = occ.format("YYYY-MM-DD");
+      if (!key.startsWith(ym)) continue;
+      (m[key] ||= []).push({ id: emp.id, name: emp.name });
+    }
+    return m;
+  }, [employees, ym]);
+
   const selectedDayEvents = eventsByDate[selectedDate] || [];
+  const selectedDayHolidays = holidaysByDate[selectedDate] || [];
+  const selectedDayBirthdays = birthdaysByDate[selectedDate] || [];
 
   const goPrevMonth = () => {
     const nm = dayjs(`${ym}-01`).subtract(1, "month").format("YYYY-MM");
@@ -425,6 +613,11 @@ function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dash
               <span key={d}>{d}</span>
             ))}
           </div>
+          <p className="dash-cal-legend-note">
+            Dots: <span className="dash-cal-legend-i dash-cal-legend-i--holiday" /> PH holiday ·{" "}
+            <span className="dash-cal-legend-i dash-cal-legend-i--birthday" /> birthday ·{" "}
+            <span className="dash-cal-legend-i dash-cal-legend-i--event" /> event
+          </p>
           <div className="dash-cal-grid">
             {calendarCells.map((cell, i) =>
               cell.type === "pad" ? (
@@ -439,11 +632,19 @@ function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dash
                   onClick={() => setSelectedDate(cell.dateStr)}
                 >
                   <span className="dash-cal-daynum">{cell.day}</span>
-                  {(eventsByDate[cell.dateStr]?.length || 0) > 0 && (
-                    <span className="dash-cal-dots" aria-hidden="true">
-                      {(eventsByDate[cell.dateStr] || []).slice(0, 3).map((_, j) => (
-                        <span key={j} className="dash-cal-dot" />
-                      ))}
+                  {(holidaysByDate[cell.dateStr]?.length ||
+                    birthdaysByDate[cell.dateStr]?.length ||
+                    eventsByDate[cell.dateStr]?.length) > 0 && (
+                    <span className="cal-app-dots" aria-hidden="true">
+                      {(holidaysByDate[cell.dateStr]?.length || 0) > 0 && (
+                        <span className="cal-dot cal-dot--holiday" />
+                      )}
+                      {(birthdaysByDate[cell.dateStr]?.length || 0) > 0 && (
+                        <span className="cal-dot cal-dot--birthday" />
+                      )}
+                      {(eventsByDate[cell.dateStr]?.length || 0) > 0 && (
+                        <span className="cal-dot cal-dot--event" />
+                      )}
                     </span>
                   )}
                 </button>
@@ -454,22 +655,59 @@ function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dash
 
         <div className="dash-data-col">
           <article className="panel dash-panel-day">
-            <h3 className="dash-panel-day-title">Events on {dayjs(selectedDate).format("MMM D, YYYY")}</h3>
-            {selectedDayEvents.length === 0 ? (
-              <p className="dash-muted">No events on this day. Use the Calendar tab to add one.</p>
-            ) : (
-              <ul className="dash-day-events">
-                {selectedDayEvents.map((ev) => (
-                  <li key={ev.id}>
-                    <strong>{ev.title}</strong>
-                    <span>
-                      {ev.time}
-                      {ev.description ? ` · ${ev.description}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            <h3 className="dash-panel-day-title">{dayjs(selectedDate).format("MMM D, YYYY")}</h3>
+
+            {selectedDayHolidays.length > 0 && (
+              <div className="dash-day-section">
+                <h4 className="dash-day-section-title">Philippines holidays</h4>
+                <ul className="dash-day-events dash-day-events--tight">
+                  {selectedDayHolidays.map((h, idx) => (
+                    <li key={`${h.date}-${h.name}-${idx}`}>
+                      <strong>{h.name}</strong>
+                      <span>{h.type === "bank" ? "PH bank" : "PH public"}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
+
+            {selectedDayBirthdays.length > 0 && (
+              <div className="dash-day-section">
+                <h4 className="dash-day-section-title">Staff birthdays</h4>
+                <ul className="dash-day-events dash-day-events--tight">
+                  {selectedDayBirthdays.map((b) => (
+                    <li key={b.id}>
+                      <strong>{b.name}</strong>
+                      <span>Birthday</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {selectedDayEvents.length > 0 && (
+              <div className="dash-day-section">
+                <h4 className="dash-day-section-title">Events</h4>
+                <ul className="dash-day-events">
+                  {selectedDayEvents.map((ev) => (
+                    <li key={ev.id}>
+                      <strong>{ev.title}</strong>
+                      <span>
+                        {ev.time}
+                        {ev.description ? ` · ${ev.description}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {selectedDayHolidays.length === 0 &&
+              selectedDayBirthdays.length === 0 &&
+              selectedDayEvents.length === 0 && (
+                <p className="dash-muted">No Philippines holidays, staff birthdays, or events on this day.</p>
+              )}
+
             <button type="button" className="btn-text dash-link-calendar" onClick={() => onNavigate("Calendar")}>
               Open full calendar →
             </button>
@@ -519,8 +757,409 @@ function DashboardSection({ dashboard, dashboardSearch, setDashboardSearch, dash
   );
 }
 
+function CalendarSection({
+  holidays,
+  events,
+  employees,
+  eventSearch,
+  setEventSearch,
+  eventFilter,
+  setEventFilter,
+  calendarShowArchived,
+  setCalendarShowArchived,
+  eventSummary,
+  filteredEvents,
+  setEditingEventId,
+  setNewEvent,
+  setModalType,
+  deleteData,
+  patchData,
+  loadAll,
+  setBackendOffline,
+}) {
+  const todayYmd = dayjs().format("YYYY-MM-DD");
+  const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
+  const [selectedDate, setSelectedDate] = useState(todayYmd);
+  const ym = viewMonth;
+
+  const { calendarCells, monthLabel } = useMemo(() => {
+    const first = dayjs(`${ym}-01`);
+    const startPad = first.day();
+    const dim = first.daysInMonth();
+    const cells = [];
+    for (let i = 0; i < startPad; i++) cells.push({ type: "pad" });
+    for (let d = 1; d <= dim; d++) {
+      const dateStr = first.date(d).format("YYYY-MM-DD");
+      cells.push({ type: "day", day: d, dateStr });
+    }
+    while (cells.length % 7 !== 0) cells.push({ type: "pad" });
+    return { calendarCells: cells, monthLabel: first.format("MMMM YYYY") };
+  }, [ym]);
+
+  const visibleCalendarEvents = useMemo(
+    () => (calendarShowArchived ? events : events.filter((e) => !e.archived)),
+    [events, calendarShowArchived]
+  );
+
+  const eventsByDate = useMemo(() => {
+    const m = {};
+    for (const ev of visibleCalendarEvents) {
+      if (!ev?.date?.startsWith(ym)) continue;
+      (m[ev.date] ||= []).push(ev);
+    }
+    return m;
+  }, [visibleCalendarEvents, ym]);
+
+  const holidaysByDate = useMemo(() => {
+    const m = {};
+    for (const h of holidays) {
+      if (!h?.date?.startsWith(ym)) continue;
+      (m[h.date] ||= []).push(h);
+    }
+    return m;
+  }, [holidays, ym]);
+
+  const birthdaysByDate = useMemo(() => {
+    const m = {};
+    const year = dayjs(`${ym}-01`).year();
+    for (const emp of employees) {
+      if (!emp.birthday || !/^\d{4}-\d{2}-\d{2}$/.test(emp.birthday)) continue;
+      const bd = dayjs(emp.birthday);
+      if (!bd.isValid()) continue;
+      const occ = dayjs(`${year}-${bd.format("MM-DD")}`);
+      if (!occ.isValid()) continue;
+      const key = occ.format("YYYY-MM-DD");
+      if (!key.startsWith(ym)) continue;
+      (m[key] ||= []).push({ id: emp.id, name: emp.name });
+    }
+    return m;
+  }, [employees, ym]);
+
+  const selectedHolidays = holidaysByDate[selectedDate] || [];
+  const selectedBirthdays = birthdaysByDate[selectedDate] || [];
+  const selectedEvents = eventsByDate[selectedDate] || [];
+
+  const goPrevMonth = () => {
+    const nm = dayjs(`${ym}-01`).subtract(1, "month").format("YYYY-MM");
+    setViewMonth(nm);
+    setSelectedDate(`${nm}-01`);
+  };
+
+  const goNextMonth = () => {
+    const nm = dayjs(`${ym}-01`).add(1, "month").format("YYYY-MM");
+    setViewMonth(nm);
+    setSelectedDate(`${nm}-01`);
+  };
+
+  const goToday = () => {
+    const t = dayjs().format("YYYY-MM");
+    setViewMonth(t);
+    setSelectedDate(todayYmd);
+  };
+
+  const openAddEvent = () => {
+    setEditingEventId(null);
+    setNewEvent({ title: "", date: selectedDate, time: "09:00", description: "" });
+    setModalType("event");
+  };
+
+  const dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  return (
+    <div className="task-tracker-page task-tracker-page--stacked cal-app">
+      <header className="task-tracker-intro">
+        <span className="task-tracker-eyebrow">Scheduling</span>
+        <h2 className="task-tracker-title">Calendar</h2>
+        <p className="task-tracker-lede">
+          <strong>Philippines (PH)</strong> national holidays (public and bank) come from the holiday calendar and refresh with live data.
+          Staff birthdays and your events show on the grid. Archive old events to keep the list tidy.
+        </p>
+      </header>
+
+      <div className="tracker-summary tracker-summary--row cal-app-kpis">
+        <article className="tracker-kpi">
+          <small>Active events</small>
+          <strong>{eventSummary.total}</strong>
+        </article>
+        <article className="tracker-kpi">
+          <small>Today</small>
+          <strong>{eventSummary.today}</strong>
+        </article>
+        <article className="tracker-kpi">
+          <small>Upcoming</small>
+          <strong>{eventSummary.upcoming}</strong>
+        </article>
+        <article className="tracker-kpi">
+          <small>Archived</small>
+          <strong>{eventSummary.archived}</strong>
+        </article>
+      </div>
+
+      <div className="cal-app-legend" aria-label="Calendar legend">
+        <span>
+          <i className="cal-legend-dot cal-legend-dot--holiday" /> PH holiday
+        </span>
+        <span>
+          <i className="cal-legend-dot cal-legend-dot--birthday" /> Birthday
+        </span>
+        <span>
+          <i className="cal-legend-dot cal-legend-dot--event" /> Event
+        </span>
+      </div>
+
+      <div className="task-tracker-filters-card">
+        <div className="task-tracker-filters-label">Filter &amp; list</div>
+        <div className="task-tracker-toolbar cal-app-toolbar">
+          <div className="inline-form task-tracker-filters">
+            <input placeholder="Search events…" value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} />
+            <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)}>
+              <option value="all">All active</option>
+              <option value="today">Today</option>
+              <option value="upcoming">Upcoming</option>
+              <option value="archived">Archived only</option>
+            </select>
+            <label className="cal-checkbox-label">
+              <input
+                type="checkbox"
+                checked={calendarShowArchived}
+                onChange={(e) => setCalendarShowArchived(e.target.checked)}
+              />
+              Show archived on calendar
+            </label>
+          </div>
+          <button type="button" className="task-tracker-add" onClick={openAddEvent}>
+            + Add Event
+          </button>
+        </div>
+      </div>
+
+      <div className="cal-app-main">
+        <article className="panel cal-app-cal-panel">
+          <div className="dash-cal-head cal-app-cal-head">
+            <button type="button" className="dash-cal-nav" onClick={goPrevMonth} aria-label="Previous month">
+              ‹
+            </button>
+            <div className="dash-cal-title">
+              <h3>{monthLabel}</h3>
+              <button type="button" className="btn-text dash-cal-today" onClick={goToday}>
+                Today
+              </button>
+            </div>
+            <button type="button" className="dash-cal-nav" onClick={goNextMonth} aria-label="Next month">
+              ›
+            </button>
+          </div>
+          <div className="dash-cal-weekdays">
+            {dowLabels.map((d) => (
+              <span key={d}>{d}</span>
+            ))}
+          </div>
+          <div className="dash-cal-grid cal-app-cal-grid">
+            {calendarCells.map((cell, i) =>
+              cell.type === "pad" ? (
+                <div key={`pad-${i}`} className="dash-cal-cell dash-cal-cell--empty" />
+              ) : (
+                <button
+                  key={cell.dateStr}
+                  type="button"
+                  className={`dash-cal-cell cal-app-cal-cell ${cell.dateStr === todayYmd ? "dash-cal-cell--today" : ""} ${
+                    cell.dateStr === selectedDate ? "dash-cal-cell--selected" : ""
+                  }`}
+                  onClick={() => setSelectedDate(cell.dateStr)}
+                >
+                  <span className="dash-cal-daynum">{cell.day}</span>
+                  <span className="cal-app-dots" aria-hidden="true">
+                    {(holidaysByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--holiday" />}
+                    {(birthdaysByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--birthday" />}
+                    {(eventsByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--event" />}
+                  </span>
+                </button>
+              )
+            )}
+          </div>
+        </article>
+
+        <div className="cal-app-side">
+          <article className="panel cal-app-day-panel">
+            <h3 className="cal-app-day-title">{dayjs(selectedDate).format("dddd, MMM D, YYYY")}</h3>
+
+            {selectedHolidays.length > 0 && (
+              <div className="cal-app-day-block">
+                <h4 className="cal-app-day-block-title">Philippines holidays</h4>
+                <ul className="cal-app-day-list">
+                  {selectedHolidays.map((h, idx) => (
+                    <li key={`${h.date}-${h.name}-${idx}`}>
+                      <strong>{h.name}</strong>
+                      <span className="cal-app-tag cal-app-tag--holiday">{h.type === "bank" ? "PH bank" : "PH public"}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {selectedBirthdays.length > 0 && (
+              <div className="cal-app-day-block">
+                <h4 className="cal-app-day-block-title">Staff birthdays</h4>
+                <ul className="cal-app-day-list">
+                  {selectedBirthdays.map((b) => (
+                    <li key={b.id}>
+                      <strong>{b.name}</strong>
+                      <span className="cal-app-tag cal-app-tag--birthday">Birthday</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="cal-app-day-block">
+              <h4 className="cal-app-day-block-title">Events</h4>
+              {selectedEvents.length === 0 ? (
+                <p className="modal-hint">No events this day. Use Add Event or pick another date.</p>
+              ) : (
+                <ul className="cal-app-day-list cal-app-day-list--events">
+                  {selectedEvents.map((ev) => (
+                    <li key={ev.id}>
+                      <div>
+                        <strong>{ev.title}</strong>
+                        <small>{ev.time || "—"}</small>
+                        {ev.archived && <span className="cal-app-tag cal-app-tag--archived">Archived</span>}
+                      </div>
+                      <div className="cal-app-day-actions">
+                        {!ev.archived && (
+                          <button
+                            type="button"
+                            className="btn-text"
+                            onClick={async () => {
+                              try {
+                                await patchData(`/events/${ev.id}`, { archived: true });
+                                await loadAll();
+                              } catch {
+                                setBackendOffline(true);
+                              }
+                            }}
+                          >
+                            Archive
+                          </button>
+                        )}
+                        {ev.archived && (
+                          <button
+                            type="button"
+                            className="btn-text"
+                            onClick={async () => {
+                              try {
+                                await patchData(`/events/${ev.id}`, { archived: false });
+                                await loadAll();
+                              } catch {
+                                setBackendOffline(true);
+                              }
+                            }}
+                          >
+                            Unarchive
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <article className="task-tracker-list-card">
+        <div className="task-tracker-list-heading">
+          <div>
+            <h3 className="task-tracker-list-title">Event list</h3>
+            <p className="task-tracker-list-sub">
+              {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"}{" "}
+              {filteredEvents.length === 1 ? "matches" : "match"} your filters
+            </p>
+          </div>
+        </div>
+        <div className="table task-list-scroll task-list-scroll--roomy">
+          {filteredEvents.map((ev) => (
+            <div key={ev.id} className={`list-item cal-app-event-row ${ev.archived ? "cal-app-event-row--archived" : ""}`}>
+              <div className="list-main">
+                <strong>{ev.title}</strong>
+                <small>{`${ev.date} · ${ev.time || "—"}`}</small>
+                <small>{ev.description || "No description"}</small>
+              </div>
+              <div className="list-meta list-meta--crud">
+                <button
+                  type="button"
+                  className="btn-crud"
+                  onClick={() => {
+                    setEditingEventId(ev.id);
+                    setNewEvent({
+                      title: ev.title,
+                      date: ev.date,
+                      time: ev.time || "09:00",
+                      description: ev.description || "",
+                    });
+                    setModalType("event");
+                  }}
+                >
+                  Edit
+                </button>
+                {!ev.archived ? (
+                  <button
+                    type="button"
+                    className="btn-crud"
+                    onClick={async () => {
+                      try {
+                        await patchData(`/events/${ev.id}`, { archived: true });
+                        await loadAll();
+                      } catch {
+                        setBackendOffline(true);
+                      }
+                    }}
+                  >
+                    Archive
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-crud"
+                    onClick={async () => {
+                      try {
+                        await patchData(`/events/${ev.id}`, { archived: false });
+                        await loadAll();
+                      } catch {
+                        setBackendOffline(true);
+                      }
+                    }}
+                  >
+                    Unarchive
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-crud btn-crud--danger"
+                  onClick={async () => {
+                    if (!window.confirm("Delete this event permanently?")) return;
+                    try {
+                      await deleteData(`/events/${ev.id}`);
+                      await loadAll();
+                    } catch {
+                      setBackendOffline(true);
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+                <span className="status-pill">{ev.archived ? "Archived" : "Scheduled"}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
+}
+
 function App() {
-  const [activeTab, setActiveTab] = useState("Dashboard");
+  const [activeTab, setActiveTab] = useState(() => initialAppNav?.tab ?? "Dashboard");
   const [dashboard, setDashboard] = useState(null);
   const [tasksData, setTasksData] = useState({ stages: [], items: [], logs: [] });
   const [employees, setEmployees] = useState([]);
@@ -528,16 +1167,27 @@ function App() {
   const [obSlips, setObSlips] = useState([]);
   const [employeeFilter, setEmployeeFilter] = useState("all");
   const [modalType, setModalType] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const [taskPage, setTaskPage] = useState("list");
-  const [taskProgress, setTaskProgress] = useState({ staff: "", note: "", stage: 1 });
+  const [selectedTaskId, setSelectedTaskId] = useState(() => initialAppNav?.selectedTaskId ?? null);
+  const [taskPage, setTaskPage] = useState(() => initialAppNav?.taskPage ?? "list");
+  const [taskProgress, setTaskProgress] = useState({ staff: "", note: "", stage: "1" });
   const [newTask, setNewTask] = useState({
     title: dayjs().format("YYYY-MM-DD"),
     assignedStaff: "",
     note: "",
     batchDate: dayjs().format("YYYY-MM-DD"),
   });
-  const [newEmployee, setNewEmployee] = useState({ name: "", position: "", type: "full-time", department: "COMELEC" });
+  const [newEmployee, setNewEmployee] = useState({
+    name: "",
+    position: "",
+    type: "full-time",
+    department: "COMELEC",
+    birthday: "",
+    email: "",
+    contactNo: "",
+    address: "",
+  });
+  const [holidays, setHolidays] = useState([]);
+  const [calendarShowArchived, setCalendarShowArchived] = useState(false);
   const [newEvent, setNewEvent] = useState({ title: "", date: dayjs().format("YYYY-MM-DD"), time: "09:00", description: "" });
   const [newSlip, setNewSlip] = useState({
     date: dayjs().format("YYYY-MM-DD"),
@@ -547,6 +1197,7 @@ function App() {
     purpose: "",
     timeIn: "08:00",
     timeOut: "17:00",
+    employeeId: "",
   });
   const [dashboardSearch, setDashboardSearch] = useState("");
   const [taskSearch, setTaskSearch] = useState("");
@@ -556,17 +1207,73 @@ function App() {
   const [taskError, setTaskError] = useState("");
   const [taskModalError, setTaskModalError] = useState("");
   const [obSearch, setObSearch] = useState("");
-  const [obDateFilter, setObDateFilter] = useState("all");
+  const [obQuickRange, setObQuickRange] = useState("all");
+  const [obPickDate, setObPickDate] = useState("");
+  const [obArchiveScope, setObArchiveScope] = useState("active");
+  const [obPage, setObPage] = useState(() => initialAppNav?.obPage ?? "list");
+  const [selectedObSlipId, setSelectedObSlipId] = useState(() => initialAppNav?.selectedObSlipId ?? null);
+  const [obExportIds, setObExportIds] = useState([]);
+  const obImportInputRef = useRef(null);
   const [eventSearch, setEventSearch] = useState("");
   const [eventFilter, setEventFilter] = useState("all");
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [backendOffline, setBackendOffline] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authFormMode, setAuthFormMode] = useState("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState(null);
   const [editingObId, setEditingObId] = useState(null);
   const [editingEventId, setEditingEventId] = useState(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
   const [showFinalStepConfirm, setShowFinalStepConfirm] = useState(false);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => initialAppNav?.selectedEmployeeId ?? null);
+  const [employeePage, setEmployeePage] = useState(() => initialAppNav?.employeePage ?? "list");
+
+  const navSnapRef = useRef({
+    tab: initialAppNav?.tab ?? "Dashboard",
+    taskPage: initialAppNav?.taskPage ?? "list",
+    selectedTaskId: initialAppNav?.selectedTaskId ?? null,
+    obPage: initialAppNav?.obPage ?? "list",
+    selectedObSlipId: initialAppNav?.selectedObSlipId ?? null,
+    employeePage: initialAppNav?.employeePage ?? "list",
+    selectedEmployeeId: initialAppNav?.selectedEmployeeId ?? null,
+  });
+  const historyPrimedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    navSnapRef.current = {
+      tab: activeTab,
+      taskPage,
+      selectedTaskId,
+      obPage,
+      selectedObSlipId,
+      employeePage,
+      selectedEmployeeId,
+    };
+  }, [activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+
+  const applyAndPushNav = (updates) => {
+    const merged = normalizeNav({ ...navSnapRef.current, ...updates });
+    if (!merged) return;
+    window.history.pushState({ comelec: merged }, "", "");
+    try {
+      localStorage.setItem(COMELEC_NAV_KEY, JSON.stringify(merged));
+    } catch {
+      /* ignore */
+    }
+    setActiveTab(merged.tab);
+    setTaskPage(merged.taskPage);
+    setSelectedTaskId(merged.selectedTaskId);
+    setObPage(merged.obPage);
+    setSelectedObSlipId(merged.selectedObSlipId);
+    setEmployeePage(merged.employeePage);
+    setSelectedEmployeeId(merged.selectedEmployeeId);
+  };
 
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 901px)");
@@ -584,6 +1291,8 @@ function App() {
 
   const loadAll = async () => {
     try {
+      const ping = await fetch(apiUrl("/health"));
+      if (!ping.ok) throw new Error("Backend health check failed.");
       const [d, t, e, c, o] = await Promise.all([
         jsonFetch(apiUrl("/dashboard")),
         jsonFetch(apiUrl("/tasks")),
@@ -597,17 +1306,52 @@ function App() {
       setEvents(c);
       setObSlips(o);
       setBackendOffline(false);
-    } catch {
+      try {
+        const hi = await jsonFetch(apiUrl("/holidays"));
+        setHolidays(hi.holidays || []);
+      } catch {
+        setHolidays([]);
+      }
+    } catch (e) {
+      if (String(e?.message) === "UNAUTHORIZED") {
+        setAuthUser(false);
+        return;
+      }
       setBackendOffline(true);
       setDashboard(null);
       setTasksData({ stages: [], items: [], logs: [] });
       setEmployees([]);
       setEvents([]);
       setObSlips([]);
+      setHolidays([]);
     }
   };
 
   useEffect(() => {
+    let cancelled = false;
+    const token = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!token) {
+      setAuthUser(false);
+      return () => {};
+    }
+    (async () => {
+      try {
+        const u = await jsonFetch(apiUrl("/auth/me"));
+        if (!cancelled) setAuthUser(u);
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setAuthUser(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser || typeof authUser !== "object") return undefined;
     loadAll();
     const socket = io(SOCKET_URL, {
       path: "/socket.io",
@@ -623,16 +1367,116 @@ function App() {
       setEmployees(payload.employees);
       setEvents(payload.events);
       setObSlips(payload.obSlips);
+      if (Array.isArray(payload.holidays)) setHolidays(payload.holidays);
     });
     return () => socket.disconnect();
+  }, [authUser?.id]);
+
+  useEffect(() => {
+    if (!authUser || typeof authUser !== "object") return;
+    const snap = normalizeNav({
+      tab: activeTab,
+      taskPage,
+      selectedTaskId,
+      obPage,
+      selectedObSlipId,
+      employeePage,
+      selectedEmployeeId,
+    });
+    if (snap) {
+      try {
+        localStorage.setItem(COMELEC_NAV_KEY, JSON.stringify(snap));
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [authUser, activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+
+  useEffect(() => {
+    if (!authUser || typeof authUser !== "object") {
+      historyPrimedRef.current = false;
+      return;
+    }
+    if (historyPrimedRef.current) return;
+    historyPrimedRef.current = true;
+    if (!window.history.state?.comelec) {
+      const snap = normalizeNav({
+        tab: activeTab,
+        taskPage,
+        selectedTaskId,
+        obPage,
+        selectedObSlipId,
+        employeePage,
+        selectedEmployeeId,
+      });
+      if (snap) window.history.replaceState({ comelec: snap }, "", "");
+    }
+  }, [authUser, activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+
+  useEffect(() => {
+    const onPop = (e) => {
+      const n = normalizeNav(e.state?.comelec);
+      if (!n) return;
+      setActiveTab(n.tab);
+      setTaskPage(n.taskPage);
+      setSelectedTaskId(n.selectedTaskId);
+      setObPage(n.obPage);
+      setSelectedObSlipId(n.selectedObSlipId);
+      setEmployeePage(n.employeePage);
+      setSelectedEmployeeId(n.selectedEmployeeId);
+      try {
+        localStorage.setItem(COMELEC_NAV_KEY, JSON.stringify(n));
+      } catch {
+        /* ignore */
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "Task Tracker" && taskPage === "detail" && selectedTaskId && tasksData.stages.length > 0) {
+      if (!tasksData.items.some((t) => t.id === selectedTaskId)) {
+        setTaskPage("list");
+        setSelectedTaskId(null);
+      }
+    }
+    if (activeTab === "OB Slip" && obPage === "detail" && selectedObSlipId) {
+      if (obSlips.length > 0 && !obSlips.some((s) => s.id === selectedObSlipId)) {
+        setObPage("list");
+        setSelectedObSlipId(null);
+      }
+    }
+    if (activeTab === "Employees" && employeePage === "detail" && selectedEmployeeId) {
+      if (employees.length > 0 && !employees.some((e) => e.id === selectedEmployeeId)) {
+        setEmployeePage("list");
+        setSelectedEmployeeId(null);
+      }
+    }
+  }, [
+    activeTab,
+    taskPage,
+    selectedTaskId,
+    tasksData.items,
+    obPage,
+    selectedObSlipId,
+    obSlips,
+    employeePage,
+    selectedEmployeeId,
+    employees,
+  ]);
 
   const postData = async (path, body) => {
     const r = await fetch(apiUrl(path), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify(body),
     });
+    if (r.status === 401) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      setAuthUser(false);
+      throw new Error("UNAUTHORIZED");
+    }
     if (!r.ok) {
       const text = await r.text();
       throw new Error(text || `HTTP ${r.status}`);
@@ -643,9 +1487,14 @@ function App() {
   const patchData = async (path, body) => {
     const r = await fetch(apiUrl(path), {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify(body),
     });
+    if (r.status === 401) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      setAuthUser(false);
+      throw new Error("UNAUTHORIZED");
+    }
     if (!r.ok) {
       const text = await r.text();
       throw new Error(text || `HTTP ${r.status}`);
@@ -654,7 +1503,12 @@ function App() {
   };
 
   const deleteData = async (path) => {
-    const r = await fetch(apiUrl(path), { method: "DELETE" });
+    const r = await fetch(apiUrl(path), { method: "DELETE", headers: { ...getAuthHeaders() } });
+    if (r.status === 401) {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      setAuthUser(false);
+      throw new Error("UNAUTHORIZED");
+    }
     if (!r.ok) {
       const text = await r.text();
       throw new Error(text || `HTTP ${r.status}`);
@@ -684,17 +1538,38 @@ function App() {
     advanceTask(selectedTask.id);
   };
 
+  const employeesSorted = useMemo(
+    () => [...employees].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })),
+    [employees]
+  );
+
   const filteredEmployees = useMemo(
     () =>
       (employeeFilter === "all" ? employees : employees.filter((e) => e.type === employeeFilter)).filter((e) =>
-        `${e.name} ${e.position}`.toLowerCase().includes(employeeSearch.toLowerCase())
+        `${e.name} ${e.position} ${e.department || ""} ${e.email || ""} ${e.contactNo || ""} ${e.address || ""}`
+          .toLowerCase()
+          .includes(employeeSearch.toLowerCase())
       ),
     [employees, employeeFilter, employeeSearch]
+  );
+
+  useEffect(() => {
+    setObExportIds((prev) => prev.filter((id) => obSlips.some((s) => s.id === id)));
+  }, [obSlips]);
+
+  const selectedEmployee = useMemo(
+    () => employees.find((e) => e.id === selectedEmployeeId) || null,
+    [employees, selectedEmployeeId]
   );
 
   const selectedTask = useMemo(
     () => tasksData.items.find((task) => task.id === selectedTaskId) || null,
     [tasksData.items, selectedTaskId]
+  );
+
+  const selectedObSlip = useMemo(
+    () => obSlips.find((s) => s.id === selectedObSlipId) || null,
+    [obSlips, selectedObSlipId]
   );
 
   const selectedTaskProgressPct = useMemo(() => {
@@ -732,23 +1607,50 @@ function App() {
   }, [tasksData.items, tasksData.stages.length]);
 
   const filteredObSlips = useMemo(() => {
+    const today = dayjs().format("YYYY-MM-DD");
+    const weekStart = dayjs().startOf("week").format("YYYY-MM-DD");
+    const weekEnd = dayjs().endOf("week").format("YYYY-MM-DD");
+    const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
+    const monthEnd = dayjs().endOf("month").format("YYYY-MM-DD");
     return obSlips.filter((s) => {
       const textPass = `${s.name} ${s.purpose} ${s.position}`.toLowerCase().includes(obSearch.toLowerCase());
-      const datePass = obDateFilter === "all" || (obDateFilter === "today" && s.date === dayjs().format("YYYY-MM-DD"));
+      if (obArchiveScope === "active" && s.archived) return false;
+      if (obArchiveScope === "archived" && !s.archived) return false;
+      let datePass = true;
+      if (obPickDate) datePass = s.date === obPickDate;
+      else if (obQuickRange === "today") datePass = s.date === today;
+      else if (obQuickRange === "week") datePass = s.date >= weekStart && s.date <= weekEnd;
+      else if (obQuickRange === "month") datePass = s.date >= monthStart && s.date <= monthEnd;
       return textPass && datePass;
     });
-  }, [obSlips, obSearch, obDateFilter]);
+  }, [obSlips, obSearch, obPickDate, obQuickRange, obArchiveScope]);
+
+  const filteredObSlipIds = useMemo(() => filteredObSlips.map((s) => s.id), [filteredObSlips]);
+  const obAllFilteredSelected =
+    filteredObSlipIds.length > 0 && filteredObSlipIds.every((id) => obExportIds.includes(id));
+
+  const toggleObSelectAllFiltered = () => {
+    setObExportIds((prev) => {
+      if (filteredObSlipIds.length === 0) return prev;
+      const allOn = filteredObSlipIds.every((id) => prev.includes(id));
+      if (allOn) return prev.filter((id) => !filteredObSlipIds.includes(id));
+      return [...new Set([...prev, ...filteredObSlipIds])];
+    });
+  };
 
   const filteredEvents = useMemo(() => {
-    return events.filter((ev) => {
-      const textPass = `${ev.title} ${ev.description}`.toLowerCase().includes(eventSearch.toLowerCase());
-      const today = dayjs().format("YYYY-MM-DD");
-      const filterPass =
-        eventFilter === "all" ||
-        (eventFilter === "today" && ev.date === today) ||
-        (eventFilter === "upcoming" && ev.date >= today);
-      return textPass && filterPass;
-    });
+    const today = dayjs().format("YYYY-MM-DD");
+    return events
+      .filter((ev) => {
+        const textPass = `${ev.title} ${ev.description || ""}`.toLowerCase().includes(eventSearch.toLowerCase());
+        if (!textPass) return false;
+        if (eventFilter === "archived") return !!ev.archived;
+        if (ev.archived) return false;
+        if (eventFilter === "today") return ev.date === today;
+        if (eventFilter === "upcoming") return ev.date >= today;
+        return true;
+      })
+      .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
   }, [events, eventSearch, eventFilter]);
 
   const obSlipSummary = useMemo(() => {
@@ -757,20 +1659,28 @@ function App() {
     const weekEnd = dayjs().endOf("week").format("YYYY-MM-DD");
     const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
     const monthEnd = dayjs().endOf("month").format("YYYY-MM-DD");
-    const total = obSlips.length;
-    const todayCount = obSlips.filter((s) => s.date === today).length;
-    const thisWeek = obSlips.filter((s) => s.date >= weekStart && s.date <= weekEnd).length;
-    const thisMonth = obSlips.filter((s) => s.date >= monthStart && s.date <= monthEnd).length;
-    return { total, today: todayCount, thisWeek, thisMonth };
+    const active = obSlips.filter((s) => !s.archived);
+    const archivedN = obSlips.filter((s) => s.archived).length;
+    return {
+      total: active.length,
+      archivedN,
+      today: active.filter((s) => s.date === today).length,
+      thisWeek: active.filter((s) => s.date >= weekStart && s.date <= weekEnd).length,
+      thisMonth: active.filter((s) => s.date >= monthStart && s.date <= monthEnd).length,
+    };
   }, [obSlips]);
 
   const eventSummary = useMemo(() => {
     const today = dayjs().format("YYYY-MM-DD");
-    const total = events.length;
-    const todayCount = events.filter((e) => e.date === today).length;
-    const upcoming = events.filter((e) => e.date > today).length;
-    const past = events.filter((e) => e.date < today).length;
-    return { total, today: todayCount, upcoming, past };
+    const active = events.filter((e) => !e.archived);
+    const archived = events.filter((e) => e.archived).length;
+    return {
+      total: active.length,
+      archived,
+      today: active.filter((e) => e.date === today).length,
+      upcoming: active.filter((e) => e.date > today).length,
+      past: active.filter((e) => e.date < today).length,
+    };
   }, [events]);
 
   const employeeSummary = useMemo(() => {
@@ -790,7 +1700,7 @@ function App() {
     try {
       const response = await fetch(apiUrl(`/tasks/${taskId}/stage`), {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           stage: Number(taskProgress.stage),
           assignedStaff: taskProgress.staff || "Assigned Staff",
@@ -810,7 +1720,7 @@ function App() {
         }));
       }
       const nextStage = Math.min((payload?.currentStage ?? 0) + 1, Math.max((tasksData.stages?.length || 1) - 1, 0));
-      setTaskProgress({ staff: "", note: "", stage: nextStage });
+      setTaskProgress({ staff: "", note: "", stage: String(nextStage) });
       setBackendOffline(false);
     } catch {
       setBackendOffline(true);
@@ -823,7 +1733,7 @@ function App() {
     const nextStage = Math.min(selectedTask.currentStage + 1, Math.max(tasksData.stages.length - 1, 0));
     setTaskProgress((prev) => ({
       ...prev,
-      stage: nextStage,
+      stage: String(nextStage),
     }));
   }, [selectedTask?.id, selectedTask?.currentStage, taskPage, tasksData.stages.length]);
 
@@ -831,11 +1741,19 @@ function App() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const r = await fetch(apiUrl("/ob-slips/import-excel"), { method: "POST", body: form });
+      const r = await fetch(apiUrl("/ob-slips/import-excel"), { method: "POST", headers: { ...getAuthHeaders() }, body: form });
+      if (r.status === 401) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        setAuthUser(false);
+        return;
+      }
       if (!r.ok) throw new Error("Import failed");
       await loadAll();
     } catch {
       setBackendOffline(true);
+    } finally {
+      const el = obImportInputRef.current;
+      if (el) el.value = "";
     }
   };
 
@@ -849,9 +1767,80 @@ function App() {
   };
 
   const selectTab = (tab) => {
-    setActiveTab(tab);
     setNavOpen(false);
+    const updates = { tab };
+    if (tab !== "Employees") {
+      updates.employeePage = "list";
+      updates.selectedEmployeeId = null;
+    }
+    if (tab !== "OB Slip") {
+      updates.obPage = "list";
+      updates.selectedObSlipId = null;
+    }
+    if (tab === "Task Tracker") {
+      updates.taskPage = "list";
+      updates.selectedTaskId = null;
+    }
+    applyAndPushNav(updates);
   };
+
+  const downloadObSlipsExport = async () => {
+    try {
+      const q = obExportIds.length > 0 ? `?ids=${encodeURIComponent(obExportIds.join(","))}` : "";
+      const r = await fetch(apiUrl(`/ob-slips/export-excel${q}`), { headers: { ...getAuthHeaders() } });
+      if (r.status === 401) {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        setAuthUser(false);
+        return;
+      }
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "ob-slips.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setBackendOffline(true);
+    }
+  };
+
+  if (authUser === null) {
+    return (
+      <div className="auth-gate auth-gate--loading">
+        <div className="auth-gate-card auth-gate-card--loading">
+          <p className="auth-gate-loading">Loading session…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authUser === false) {
+    return (
+      <AuthGate
+        mode={authFormMode}
+        setMode={setAuthFormMode}
+        email={authEmail}
+        setEmail={setAuthEmail}
+        password={authPassword}
+        setPassword={setAuthPassword}
+        name={authName}
+        setName={setAuthName}
+        error={authError}
+        setError={setAuthError}
+        busy={authBusy}
+        setBusy={setAuthBusy}
+        onAuthed={(user, token) => {
+          localStorage.setItem(AUTH_STORAGE_KEY, token);
+          setAuthUser(user);
+        }}
+      />
+    );
+  }
 
   return (
     <div className={`layout modern${navOpen ? " nav-open" : ""}`}>
@@ -885,7 +1874,29 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="live-pill">v1.0</div>
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <p className="sidebar-user-label">Signed in</p>
+            <p className="sidebar-user-name">{authUser.name || authUser.email}</p>
+            <button
+              type="button"
+              className="sidebar-logout"
+              onClick={async () => {
+                try {
+                  await fetch(apiUrl("/auth/logout"), { method: "POST", headers: { ...getAuthHeaders() } });
+                } catch {
+                  /* ignore */
+                }
+                localStorage.removeItem(AUTH_STORAGE_KEY);
+                setAuthUser(false);
+                setNavOpen(false);
+              }}
+            >
+              Log out
+            </button>
+          </div>
+          <div className="live-pill">v1.0</div>
+        </div>
       </aside>
 
       <main className="content">
@@ -912,7 +1923,9 @@ function App() {
             dashboardSearch={dashboardSearch}
             setDashboardSearch={setDashboardSearch}
             dashboardRecent={dashboardRecent}
-            events={events}
+            events={events.filter((e) => !e.archived)}
+            holidays={holidays}
+            employees={employees}
             onNavigate={selectTab}
           />
         )}
@@ -1008,12 +2021,12 @@ function App() {
                             : task.currentStage === 0
                             ? "Pending"
                             : "In Progress";
+                        const isCompleted = task.currentStage === tasksData.stages.length - 1;
                         const openTaskDetail = () => {
-                          setSelectedTaskId(task.id);
-                          setTaskPage("detail");
                           setTaskError("");
                           const nextStage = Math.min(task.currentStage + 1, tasksData.stages.length - 1);
-                          setTaskProgress({ staff: "", note: "", stage: nextStage });
+                          setTaskProgress({ staff: "", note: "", stage: String(nextStage) });
+                          applyAndPushNav({ taskPage: "detail", selectedTaskId: task.id });
                         };
                         return (
                           <div
@@ -1032,7 +2045,7 @@ function App() {
                             <div className="list-main">
                               <strong>{task.title}</strong>
                               <small>{`Batch date: ${task.batchDate}`}</small>
-                              <div className="task-progress-bar">
+                              <div className={`task-progress-bar${isCompleted ? " task-progress-bar--complete" : ""}`}>
                                 <span style={{ width: `${progressPct}%` }} />
                               </div>
                             </div>
@@ -1062,8 +2075,7 @@ function App() {
                                   try {
                                     await deleteData(`/tasks/${task.id}`);
                                     if (selectedTaskId === task.id) {
-                                      setSelectedTaskId(null);
-                                      setTaskPage("list");
+                                      applyAndPushNav({ taskPage: "list", selectedTaskId: null });
                                     }
                                     await loadAll();
                                   } catch {
@@ -1099,8 +2111,7 @@ function App() {
                         try {
                           const id = selectedTask.id;
                           await deleteData(`/tasks/${id}`);
-                          setSelectedTaskId(null);
-                          setTaskPage("list");
+                          applyAndPushNav({ taskPage: "list", selectedTaskId: null });
                           await loadAll();
                         } catch {
                           setBackendOffline(true);
@@ -1109,7 +2120,9 @@ function App() {
                     >
                       Delete batch
                     </button>
-                    <button type="button" onClick={() => setTaskPage("list")}>Back to Task List</button>
+                    <button type="button" onClick={() => applyAndPushNav({ taskPage: "list", selectedTaskId: null })}>
+                      Back to Task List
+                    </button>
                   </div>
                 </div>
                 <div className="batch-details-card">
@@ -1159,18 +2172,30 @@ function App() {
                   }}
                 >
                   <select
-                    value={selectedTask.currentStage >= tasksData.stages.length - 1 ? "" : taskProgress.stage}
+                    value={selectedTask.currentStage >= tasksData.stages.length - 1 ? "" : String(taskProgress.stage)}
                     onChange={(e) => setTaskProgress({ ...taskProgress, stage: e.target.value })}
                   >
                     {tasksData.stages
                       .map((s, i) => ({ label: s, index: i }))
                       .filter(({ index }) => index === selectedTask.currentStage + 1 || (selectedTask.currentStage === 2 && index === 1))
                       .map(({ label, index }) => (
-                        <option value={index} key={label}>{`${index}. ${label}`}</option>
+                        <option value={String(index)} key={label}>{`${index + 1}. ${label}`}</option>
                       ))}
                     {selectedTask.currentStage >= tasksData.stages.length - 1 && <option value="">Final stage reached</option>}
                   </select>
-                  <input placeholder="Assign Staff" value={taskProgress.staff} onChange={(e) => setTaskProgress({ ...taskProgress, staff: e.target.value })} required />
+                  <select
+                    value={taskProgress.staff}
+                    onChange={(e) => setTaskProgress({ ...taskProgress, staff: e.target.value })}
+                    required
+                    aria-label="Assigned employee"
+                  >
+                    <option value="">Select employee</option>
+                    {employeesSorted.map((emp) => (
+                      <option key={emp.id} value={emp.name}>
+                        {emp.name}
+                      </option>
+                    ))}
+                  </select>
                   <input placeholder="Note (optional)" value={taskProgress.note} onChange={(e) => setTaskProgress({ ...taskProgress, note: e.target.value })} />
                   <button
                     className={`apply-step-btn ${selectedTask.currentStage >= tasksData.stages.length - 1 ? "apply-step-btn--done" : ""}`}
@@ -1206,380 +2231,701 @@ function App() {
 
         {activeTab === "OB Slip" && (
           <section className="tracker-layout single">
-            <div className="task-tracker-page task-tracker-page--stacked">
-              <header className="task-tracker-intro">
-                <span className="task-tracker-eyebrow">Documents</span>
-                <h2 className="task-tracker-title">Official Business Slips</h2>
-                <p className="task-tracker-lede">
-                  Record and print OB slips for field work. Search slips, export or import Excel, and add new entries.
-                </p>
-              </header>
+            {obPage === "list" && (
+              <div className="task-tracker-page task-tracker-page--stacked">
+                <header className="task-tracker-intro">
+                  <span className="task-tracker-eyebrow">Documents</span>
+                  <h2 className="task-tracker-title">Official Business Slips</h2>
+                  <p className="task-tracker-lede">Click a slip for full details, print, archive, or edit.</p>
+                </header>
 
-              <div className="tracker-summary tracker-summary--row">
-                <article className="tracker-kpi">
-                  <small>Total OB Slips</small>
-                  <strong>{obSlipSummary.total}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Today</small>
-                  <strong>{obSlipSummary.today}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>This week</small>
-                  <strong>{obSlipSummary.thisWeek}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>This month</small>
-                  <strong>{obSlipSummary.thisMonth}</strong>
+                <div className="tracker-summary tracker-summary--row">
+                  <article className="tracker-kpi">
+                    <small>Active slips</small>
+                    <strong>{obSlipSummary.total}</strong>
+                    <span className="tracker-kpi-hint">{obSlipSummary.archivedN} archived</span>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>Today</small>
+                    <strong>{obSlipSummary.today}</strong>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>This week</small>
+                    <strong>{obSlipSummary.thisWeek}</strong>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>This month</small>
+                    <strong>{obSlipSummary.thisMonth}</strong>
+                  </article>
+                </div>
+
+                <div className="task-tracker-filters-card">
+                  <div className="task-tracker-filters-label">Filter &amp; search</div>
+                  <div className="task-tracker-toolbar task-tracker-toolbar--ob-slip">
+                    <div className="inline-form task-tracker-filters">
+                      <input
+                        placeholder="Search slip"
+                        value={obSearch}
+                        onChange={(e) => setObSearch(e.target.value)}
+                        aria-label="Search slips"
+                      />
+                      <div className="ob-date-filter" title="Exact slip date">
+                        <span className="ob-date-filter-icon" aria-hidden="true">
+                          {tabIcons.Calendar}
+                        </span>
+                        <input
+                          type="date"
+                          className="ob-date-filter-input"
+                          value={obPickDate}
+                          onChange={(e) => setObPickDate(e.target.value)}
+                          aria-label="Filter by slip date"
+                        />
+                        {obPickDate ? (
+                          <button type="button" className="ob-date-filter-clear" onClick={() => setObPickDate("")}>
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                      <select
+                        value={obQuickRange}
+                        onChange={(e) => setObQuickRange(e.target.value)}
+                        disabled={!!obPickDate}
+                        title={obPickDate ? "Clear the date field to use a preset range" : ""}
+                        aria-label="Date range preset"
+                      >
+                        <option value="all">Any date</option>
+                        <option value="today">Today</option>
+                        <option value="week">This week</option>
+                        <option value="month">This month</option>
+                      </select>
+                      <select value={obArchiveScope} onChange={(e) => setObArchiveScope(e.target.value)} aria-label="Archive filter">
+                        <option value="active">Active only</option>
+                        <option value="archived">Archived only</option>
+                        <option value="all">Active + archived</option>
+                      </select>
+                      <button type="button" className="ob-slip-action" onClick={() => downloadObSlipsExport()}>
+                        {obExportIds.length > 0 ? `Export selected (${obExportIds.length})` : "Export Excel"}
+                      </button>
+                      <label className="upload-btn ob-slip-action">
+                        Import Excel
+                        <input
+                          ref={obImportInputRef}
+                          type="file"
+                          accept=".csv,text/csv"
+                          onChange={(e) => e.target.files?.[0] && importSlipExcel(e.target.files[0])}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="task-tracker-add ob-slip-action"
+                        onClick={() => {
+                          setEditingObId(null);
+                          setNewSlip({
+                            date: dayjs().format("YYYY-MM-DD"),
+                            name: "",
+                            position: "",
+                            department: "COMELEC",
+                            purpose: "",
+                            timeIn: "08:00",
+                            timeOut: "17:00",
+                            employeeId: "",
+                          });
+                          setModalType("ob");
+                        }}
+                      >
+                        + Add Slip
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <article className="task-tracker-list-card">
+                  <div className="task-tracker-list-heading task-tracker-list-heading--ob-export">
+                    <div>
+                      <h3 className="task-tracker-list-title">Slip queue</h3>
+                      <p className="task-tracker-list-sub">
+                        {filteredObSlips.length} slip{filteredObSlips.length === 1 ? "" : "s"} match your filters
+                        {obExportIds.length > 0 ? ` · ${obExportIds.length} selected for export` : ""}
+                      </p>
+                    </div>
+                    {filteredObSlips.length > 0 ? (
+                      <label className="ob-slip-select-all">
+                        <input type="checkbox" checked={obAllFilteredSelected} onChange={toggleObSelectAllFiltered} />
+                        <span>Select visible</span>
+                      </label>
+                    ) : null}
+                  </div>
+                  <div className="task-list task-list-scroll task-list-scroll--roomy">
+                    {filteredObSlips.length === 0 ? (
+                      <div className="task-empty">No slips match your filters.</div>
+                    ) : (
+                      filteredObSlips.map((s) => {
+                        const openDetail = () => {
+                          applyAndPushNav({ obPage: "detail", selectedObSlipId: s.id });
+                        };
+                        return (
+                          <div
+                            key={s.id}
+                            className={`task-item list-item task-list-item ob-slip-row${s.archived ? " ob-slip-row--archived" : ""}`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={openDetail}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openDetail();
+                              }
+                            }}
+                          >
+                            <div className="ob-slip-row-check" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={obExportIds.includes(s.id)}
+                                onChange={() =>
+                                  setObExportIds((p) => (p.includes(s.id) ? p.filter((x) => x !== s.id) : [...p, s.id]))
+                                }
+                                aria-label={`Select ${s.name} for export`}
+                              />
+                            </div>
+                            <div className="list-main">
+                              <strong>{s.name}</strong>
+                              <small>{`${s.position} • ${s.department || "COMELEC"} • ${s.date}`}</small>
+                              <small>{`${s.purpose} (${s.timeIn}-${s.timeOut})`}</small>
+                            </div>
+                            <div className="list-meta list-meta--crud" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="btn-crud"
+                                onClick={() => {
+                                  setEditingObId(s.id);
+                                  setNewSlip({
+                                    date: s.date,
+                                    name: s.name,
+                                    position: s.position,
+                                    department: s.department || "COMELEC",
+                                    purpose: s.purpose,
+                                    timeIn: s.timeIn,
+                                    timeOut: s.timeOut,
+                                    employeeId: s.employeeId || "",
+                                  });
+                                  setModalType("ob");
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-crud btn-crud--danger"
+                                onClick={async () => {
+                                  if (!window.confirm("Delete this OB slip permanently?")) return;
+                                  try {
+                                    await deleteData(`/ob-slips/${s.id}`);
+                                    setObExportIds((p) => p.filter((x) => x !== s.id));
+                                    if (selectedObSlipId === s.id) {
+                                      applyAndPushNav({ obPage: "list", selectedObSlipId: null });
+                                    }
+                                    await loadAll();
+                                  } catch {
+                                    setBackendOffline(true);
+                                  }
+                                }}
+                              >
+                                Delete
+                              </button>
+                              {s.archived ? (
+                                <span className="status-pill status-pill--muted">Archived</span>
+                              ) : (
+                                <span className="status-pill">Active</span>
+                              )}
+                              <span className="list-arrow">›</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </article>
               </div>
+            )}
 
-              <div className="task-tracker-filters-card">
-                <div className="task-tracker-filters-label">Filter &amp; search</div>
-                <div className="task-tracker-toolbar task-tracker-toolbar--ob-slip">
-                  <div className="inline-form task-tracker-filters">
-                    <input placeholder="Search slip" value={obSearch} onChange={(e) => setObSearch(e.target.value)} />
-                    <select value={obDateFilter} onChange={(e) => setObDateFilter(e.target.value)}>
-                      <option value="all">All Dates</option>
-                      <option value="today">Today</option>
-                    </select>
-                    <button
-                      type="button"
-                      className="ob-slip-action"
-                      onClick={() => window.open(apiUrl("/ob-slips/export-excel"), "_blank")}
-                    >
-                      Export Excel
+            {obPage === "detail" && selectedObSlip && (
+              <article className="panel ob-slip-detail-panel">
+                <div className="panel-head panel-head--task-detail">
+                  <h3>{selectedObSlip.name}</h3>
+                  <div className="panel-head-actions">
+                    <button type="button" className="btn-crud" onClick={() => printSlip(selectedObSlip)}>
+                      Print
                     </button>
-                    <label className="upload-btn ob-slip-action">
-                      Import Excel
-                      <input
-                        type="file"
-                        accept=".csv,text/csv"
-                        onChange={(e) => e.target.files?.[0] && importSlipExcel(e.target.files[0])}
-                      />
-                    </label>
                     <button
                       type="button"
-                      className="task-tracker-add ob-slip-action"
+                      className="btn-crud"
                       onClick={() => {
-                        setEditingObId(null);
+                        setEditingObId(selectedObSlip.id);
                         setNewSlip({
-                          date: dayjs().format("YYYY-MM-DD"),
-                          name: "",
-                          position: "",
-                          department: "COMELEC",
-                          purpose: "",
-                          timeIn: "08:00",
-                          timeOut: "17:00",
+                          date: selectedObSlip.date,
+                          name: selectedObSlip.name,
+                          position: selectedObSlip.position,
+                          department: selectedObSlip.department || "COMELEC",
+                          purpose: selectedObSlip.purpose,
+                          timeIn: selectedObSlip.timeIn,
+                          timeOut: selectedObSlip.timeOut,
+                          employeeId: selectedObSlip.employeeId || "",
                         });
                         setModalType("ob");
                       }}
                     >
-                      + Add Slip
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-crud"
+                      onClick={async () => {
+                        try {
+                          await patchData(`/ob-slips/${selectedObSlip.id}`, { archived: !selectedObSlip.archived });
+                          await loadAll();
+                        } catch {
+                          setBackendOffline(true);
+                        }
+                      }}
+                    >
+                      {selectedObSlip.archived ? "Restore" : "Archive"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-crud btn-crud--danger"
+                      onClick={async () => {
+                        if (!window.confirm("Delete this OB slip permanently?")) return;
+                        try {
+                          await deleteData(`/ob-slips/${selectedObSlip.id}`);
+                          setObExportIds((p) => p.filter((x) => x !== selectedObSlip.id));
+                          applyAndPushNav({ obPage: "list", selectedObSlipId: null });
+                          await loadAll();
+                        } catch {
+                          setBackendOffline(true);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button type="button" onClick={() => applyAndPushNav({ obPage: "list", selectedObSlipId: null })}>
+                      Back to slip queue
                     </button>
                   </div>
                 </div>
-              </div>
-
-              <article className="task-tracker-list-card">
-                <div className="task-tracker-list-heading">
-                  <div>
-                    <h3 className="task-tracker-list-title">Slip queue</h3>
-                    <p className="task-tracker-list-sub">
-                      {filteredObSlips.length} slip{filteredObSlips.length === 1 ? "" : "s"} match your filters
-                    </p>
+                <div className="batch-details-card">
+                  <div className="batch-details-head">
+                    <h4>Slip details</h4>
+                    <span className={`status-pill${selectedObSlip.archived ? " status-pill--muted" : ""}`}>
+                      {selectedObSlip.archived ? "Archived" : "Active"}
+                    </span>
+                  </div>
+                  <div className="batch-details-grid">
+                    <div>
+                      <small>Date</small>
+                      <strong>{selectedObSlip.date}</strong>
+                    </div>
+                    <div>
+                      <small>Name</small>
+                      <strong>{selectedObSlip.name}</strong>
+                    </div>
+                    <div>
+                      <small>Position</small>
+                      <strong>{selectedObSlip.position}</strong>
+                    </div>
+                    <div>
+                      <small>Department</small>
+                      <strong>{selectedObSlip.department || "COMELEC"}</strong>
+                    </div>
+                    <div className="batch-details-span-2">
+                      <small>Purpose</small>
+                      <strong>{selectedObSlip.purpose}</strong>
+                    </div>
+                    <div>
+                      <small>Time in</small>
+                      <strong>{selectedObSlip.timeIn}</strong>
+                    </div>
+                    <div>
+                      <small>Time out</small>
+                      <strong>{selectedObSlip.timeOut}</strong>
+                    </div>
+                    {selectedObSlip.createdAt ? (
+                      <div>
+                        <small>Recorded</small>
+                        <strong>{dayjs(selectedObSlip.createdAt).format("MMM D, YYYY h:mm A")}</strong>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-                <div className="table task-list-scroll task-list-scroll--roomy">
-                  {filteredObSlips.map((s) => (
-                    <div key={s.id} className="slip-card">
-                      <div className="list-main">
-                        <strong>{s.name}</strong>
-                        <small>{`${s.position} • ${s.department} • ${s.date}`}</small>
-                        <small>{`${s.purpose} (${s.timeIn}-${s.timeOut})`}</small>
-                      </div>
-                      <div className="list-meta list-meta--crud">
-                        <button
-                          type="button"
-                          className="btn-crud"
-                          onClick={() => {
-                            setEditingObId(s.id);
-                            setNewSlip({
-                              date: s.date,
-                              name: s.name,
-                              position: s.position,
-                              department: s.department || "COMELEC",
-                              purpose: s.purpose,
-                              timeIn: s.timeIn,
-                              timeOut: s.timeOut,
-                            });
-                            setModalType("ob");
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-crud btn-crud--danger"
-                          onClick={async () => {
-                            if (!window.confirm("Delete this OB slip?")) return;
-                            try {
-                              await deleteData(`/ob-slips/${s.id}`);
-                              await loadAll();
-                            } catch {
-                              setBackendOffline(true);
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                        <button type="button" onClick={() => printSlip(s)}>Print Slip</button>
-                        <span className="list-arrow">›</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </article>
-            </div>
+            )}
+
+            {obPage === "detail" && !selectedObSlip && (
+              <article className="panel">
+                <p className="modal-hint">This slip is no longer in the list.</p>
+                <button type="button" onClick={() => applyAndPushNav({ obPage: "list", selectedObSlipId: null })}>
+                  Back to slip queue
+                </button>
+              </article>
+            )}
           </section>
         )}
 
         {activeTab === "Calendar" && (
           <section className="tracker-layout single">
-            <div className="task-tracker-page task-tracker-page--stacked">
-              <header className="task-tracker-intro">
-                <span className="task-tracker-eyebrow">Scheduling</span>
-                <h2 className="task-tracker-title">Calendar &amp; events</h2>
-                <p className="task-tracker-lede">
-                  Track hearings, deadlines, and field activities. Filter by today or upcoming, or add a new event.
-                </p>
-              </header>
-
-              <div className="tracker-summary tracker-summary--row">
-                <article className="tracker-kpi">
-                  <small>Total events</small>
-                  <strong>{eventSummary.total}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Today</small>
-                  <strong>{eventSummary.today}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Upcoming</small>
-                  <strong>{eventSummary.upcoming}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Past</small>
-                  <strong>{eventSummary.past}</strong>
-                </article>
-              </div>
-
-              <div className="task-tracker-filters-card">
-                <div className="task-tracker-filters-label">Filter &amp; search</div>
-                <div className="task-tracker-toolbar">
-                  <div className="inline-form task-tracker-filters">
-                    <input placeholder="Search event" value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} />
-                    <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)}>
-                      <option value="all">All</option>
-                      <option value="today">Today</option>
-                      <option value="upcoming">Upcoming</option>
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    className="task-tracker-add"
-                    onClick={() => {
-                      setEditingEventId(null);
-                      setNewEvent({ title: "", date: dayjs().format("YYYY-MM-DD"), time: "09:00", description: "" });
-                      setModalType("event");
-                    }}
-                  >
-                    + Add Event
-                  </button>
-                </div>
-              </div>
-
-              <article className="task-tracker-list-card">
-                <div className="task-tracker-list-heading">
-                  <div>
-                    <h3 className="task-tracker-list-title">Event list</h3>
-                    <p className="task-tracker-list-sub">
-                      {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"} match your filters
-                    </p>
-                  </div>
-                </div>
-                <div className="table task-list-scroll task-list-scroll--roomy">
-                  {filteredEvents.map((ev) => (
-                    <div key={ev.id} className="list-item">
-                      <div className="list-main">
-                        <strong>{ev.title}</strong>
-                        <small>{`${ev.date} • ${ev.time}`}</small>
-                        <small>{ev.description || "No description"}</small>
-                      </div>
-                      <div className="list-meta list-meta--crud">
-                        <button
-                          type="button"
-                          className="btn-crud"
-                          onClick={() => {
-                            setEditingEventId(ev.id);
-                            setNewEvent({
-                              title: ev.title,
-                              date: ev.date,
-                              time: ev.time || "09:00",
-                              description: ev.description || "",
-                            });
-                            setModalType("event");
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-crud btn-crud--danger"
-                          onClick={async () => {
-                            if (!window.confirm("Delete this event?")) return;
-                            try {
-                              await deleteData(`/events/${ev.id}`);
-                              await loadAll();
-                            } catch {
-                              setBackendOffline(true);
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                        <span className="status-pill">Scheduled</span>
-                        <span className="list-arrow">›</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            </div>
+            <CalendarSection
+              holidays={holidays}
+              events={events}
+              employees={employees}
+              eventSearch={eventSearch}
+              setEventSearch={setEventSearch}
+              eventFilter={eventFilter}
+              setEventFilter={setEventFilter}
+              calendarShowArchived={calendarShowArchived}
+              setCalendarShowArchived={setCalendarShowArchived}
+              eventSummary={eventSummary}
+              filteredEvents={filteredEvents}
+              setEditingEventId={setEditingEventId}
+              setNewEvent={setNewEvent}
+              setModalType={setModalType}
+              deleteData={deleteData}
+              patchData={patchData}
+              loadAll={loadAll}
+              setBackendOffline={setBackendOffline}
+            />
           </section>
         )}
 
         {activeTab === "Employees" && (
           <section className="tracker-layout single">
-            <div className="task-tracker-page task-tracker-page--stacked">
-              <header className="task-tracker-intro">
-                <span className="task-tracker-eyebrow">Roster</span>
-                <h2 className="task-tracker-title">Employees</h2>
-                <p className="task-tracker-lede">
-                  Manage COMELEC staff and assignments. Search by name or role, filter by employment type, and add new hires.
-                </p>
-              </header>
+            {employeePage === "list" && (
+              <div className="task-tracker-page task-tracker-page--stacked">
+                <header className="task-tracker-intro">
+                  <span className="task-tracker-eyebrow">Roster</span>
+                  <h2 className="task-tracker-title">Employees</h2>
+                  <p className="task-tracker-lede">
+                    Browse staff, open a profile for basic info, or add new hires. Click a row to open their page.
+                  </p>
+                </header>
 
-              <div className="tracker-summary tracker-summary--row">
-                <article className="tracker-kpi">
-                  <small>Total employees</small>
-                  <strong>{employeeSummary.total}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Full-time</small>
-                  <strong>{employeeSummary.fullTime}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Part-time</small>
-                  <strong>{employeeSummary.partTime}</strong>
-                </article>
-                <article className="tracker-kpi">
-                  <small>Departments</small>
-                  <strong>{employeeSummary.departments}</strong>
-                </article>
-              </div>
-
-              <div className="task-tracker-filters-card">
-                <div className="task-tracker-filters-label">Filter &amp; search</div>
-                <div className="task-tracker-toolbar">
-                  <div className="inline-form task-tracker-filters">
-                    <input placeholder="Search employee" value={employeeSearch} onChange={(e) => setEmployeeSearch(e.target.value)} />
-                    <select value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)}>
-                      <option value="all">All Employees</option>
-                      <option value="full-time">Full-Time</option>
-                      <option value="part-time">Part-Time</option>
-                    </select>
-                  </div>
-                  <button
-                    type="button"
-                    className="task-tracker-add"
-                    onClick={() => {
-                      setEditingEmployeeId(null);
-                      setNewEmployee({ name: "", position: "", type: "full-time", department: "COMELEC" });
-                      setModalType("employee");
-                    }}
-                  >
-                    + Add Employee
-                  </button>
+                <div className="tracker-summary tracker-summary--row">
+                  <article className="tracker-kpi">
+                    <small>Total employees</small>
+                    <strong>{employeeSummary.total}</strong>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>Full-time</small>
+                    <strong>{employeeSummary.fullTime}</strong>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>Part-time</small>
+                    <strong>{employeeSummary.partTime}</strong>
+                  </article>
+                  <article className="tracker-kpi">
+                    <small>Departments</small>
+                    <strong>{employeeSummary.departments}</strong>
+                  </article>
                 </div>
-              </div>
 
-              <article className="task-tracker-list-card">
-                <div className="task-tracker-list-heading">
-                  <div>
-                    <h3 className="task-tracker-list-title">Staff directory</h3>
-                    <p className="task-tracker-list-sub">
-                      {filteredEmployees.length} employee{filteredEmployees.length === 1 ? "" : "s"} match your filters
-                    </p>
-                  </div>
-                </div>
-                <div className="table task-list-scroll task-list-scroll--roomy">
-                  {filteredEmployees.map((emp) => (
-                    <div key={emp.id} className="list-item">
-                      <div className="list-main">
-                        <strong>{emp.name}</strong>
-                        <small>{`${emp.position} • ${emp.department}`}</small>
-                      </div>
-                      <div className="list-meta list-meta--crud">
-                        <button
-                          type="button"
-                          className="btn-crud"
-                          onClick={() => {
-                            setEditingEmployeeId(emp.id);
-                            setNewEmployee({
-                              name: emp.name,
-                              position: emp.position,
-                              type: emp.type,
-                              department: emp.department || "COMELEC",
-                            });
-                            setModalType("employee");
-                          }}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-crud btn-crud--danger"
-                          onClick={async () => {
-                            if (!window.confirm("Delete this employee?")) return;
-                            try {
-                              await deleteData(`/employees/${emp.id}`);
-                              await loadAll();
-                            } catch {
-                              setBackendOffline(true);
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
-                        <span className="status-pill">{emp.type === "full-time" ? "Full-Time" : "Part-Time"}</span>
-                        <span className="list-arrow">›</span>
-                      </div>
+                <div className="task-tracker-filters-card">
+                  <div className="task-tracker-filters-label">Filter &amp; search</div>
+                  <div className="task-tracker-toolbar">
+                    <div className="inline-form task-tracker-filters">
+                      <input
+                        placeholder="Search by name, role, or department…"
+                        value={employeeSearch}
+                        onChange={(e) => setEmployeeSearch(e.target.value)}
+                      />
+                      <select value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)}>
+                        <option value="all">All Employees</option>
+                        <option value="full-time">Full-Time</option>
+                        <option value="part-time">Part-Time</option>
+                      </select>
                     </div>
-                  ))}
+                    <button
+                      type="button"
+                      className="task-tracker-add"
+                      onClick={() => {
+                        setEditingEmployeeId(null);
+                        setNewEmployee({
+                          name: "",
+                          position: "",
+                          type: "full-time",
+                          department: "COMELEC",
+                          birthday: "",
+                          email: "",
+                          contactNo: "",
+                          address: "",
+                        });
+                        setModalType("employee");
+                      }}
+                    >
+                      + Add Employee
+                    </button>
+                  </div>
+                </div>
+
+                <article className="task-tracker-list-card">
+                  <div className="task-tracker-list-heading">
+                    <div>
+                      <h3 className="task-tracker-list-title">Staff directory</h3>
+                      <p className="task-tracker-list-sub">
+                        {filteredEmployees.length} employee{filteredEmployees.length === 1 ? "" : "s"} match your filters
+                      </p>
+                    </div>
+                  </div>
+                  <div className="task-list task-list-scroll task-list-scroll--roomy">
+                    {filteredEmployees.length === 0 ? (
+                      <div className="task-empty">No employees match your filters.</div>
+                    ) : (
+                      filteredEmployees.map((emp) => {
+                        const openProfile = () => {
+                          applyAndPushNav({ employeePage: "detail", selectedEmployeeId: emp.id });
+                        };
+                        return (
+                          <div
+                            key={emp.id}
+                            className="staff-list-item list-item task-list-item"
+                            role="button"
+                            tabIndex={0}
+                            onClick={openProfile}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openProfile();
+                              }
+                            }}
+                          >
+                            <div className="staff-list-main">
+                              <span className="staff-avatar" aria-hidden="true">
+                                {staffInitials(emp.name)}
+                              </span>
+                              <div className="list-main">
+                                <strong>{emp.name}</strong>
+                                <small className="staff-list-meta-line">{emp.position}</small>
+                                {(emp.email || emp.contactNo) && (
+                                  <small className="staff-list-contact-line">
+                                    {emp.email ? <span>{emp.email}</span> : null}
+                                    {emp.email && emp.contactNo ? <span className="staff-list-dot"> · </span> : null}
+                                    {emp.contactNo ? <span>{emp.contactNo}</span> : null}
+                                  </small>
+                                )}
+                                <small className="staff-list-basic">
+                                  <span>{emp.department || "—"}</span>
+                                  <span className="staff-list-dot" aria-hidden="true">
+                                    ·
+                                  </span>
+                                  <span>{emp.type === "full-time" ? "Full-time" : "Part-time"}</span>
+                                </small>
+                                <small className="staff-list-basic-line">
+                                  <span className="staff-basic-kicker">Basic info</span>
+                                  <span>
+                                    {emp.birthday
+                                      ? `Birthday ${dayjs(emp.birthday).format("MMM D, YYYY")}`
+                                      : "Birthday not on file"}
+                                    {emp.email ? ` · ${emp.email}` : ""}
+                                    {emp.contactNo ? ` · ${emp.contactNo}` : ""}
+                                  </span>
+                                </small>
+                              </div>
+                            </div>
+                            <div className="list-meta list-meta--crud" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="btn-crud"
+                                onClick={() => {
+                                  setEditingEmployeeId(emp.id);
+                                  setNewEmployee({
+                                    name: emp.name,
+                                    position: emp.position,
+                                    type: emp.type,
+                                    department: emp.department || "COMELEC",
+                                    birthday: emp.birthday || "",
+                                    email: emp.email || "",
+                                    contactNo: emp.contactNo || "",
+                                    address: emp.address || "",
+                                  });
+                                  setModalType("employee");
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-crud btn-crud--danger"
+                                onClick={async () => {
+                                  if (!window.confirm("Delete this employee?")) return;
+                                  try {
+                                    await deleteData(`/employees/${emp.id}`);
+                                    if (selectedEmployeeId === emp.id) {
+                                      applyAndPushNav({ employeePage: "list", selectedEmployeeId: null });
+                                    }
+                                    await loadAll();
+                                  } catch {
+                                    setBackendOffline(true);
+                                  }
+                                }}
+                              >
+                                Delete
+                              </button>
+                              <span className="status-pill">{emp.type === "full-time" ? "Full-Time" : "Part-Time"}</span>
+                              <span className="list-arrow">›</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </article>
+              </div>
+            )}
+
+            {employeePage === "detail" && selectedEmployee && (
+              <article className="panel staff-detail-panel">
+                <div className="panel-head panel-head--task-detail">
+                  <h3>{selectedEmployee.name}</h3>
+                  <div className="panel-head-actions">
+                    <button
+                      type="button"
+                      className="btn-crud"
+                      onClick={() => {
+                        setEditingEmployeeId(selectedEmployee.id);
+                        setNewEmployee({
+                          name: selectedEmployee.name,
+                          position: selectedEmployee.position,
+                          type: selectedEmployee.type,
+                          department: selectedEmployee.department || "COMELEC",
+                          birthday: selectedEmployee.birthday || "",
+                          email: selectedEmployee.email || "",
+                          contactNo: selectedEmployee.contactNo || "",
+                          address: selectedEmployee.address || "",
+                        });
+                        setModalType("employee");
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-crud btn-crud--danger"
+                      onClick={async () => {
+                        if (!window.confirm("Delete this employee?")) return;
+                        try {
+                          await deleteData(`/employees/${selectedEmployee.id}`);
+                          applyAndPushNav({ employeePage: "list", selectedEmployeeId: null });
+                          await loadAll();
+                        } catch {
+                          setBackendOffline(true);
+                        }
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button type="button" onClick={() => applyAndPushNav({ employeePage: "list", selectedEmployeeId: null })}>
+                      Back to staff directory
+                    </button>
+                  </div>
+                </div>
+
+                <div className="staff-detail-hero">
+                  <div className="staff-avatar staff-avatar--large" aria-hidden="true">
+                    {staffInitials(selectedEmployee.name)}
+                  </div>
+                  <div className="staff-detail-hero-text">
+                    <p className="staff-detail-role">{selectedEmployee.position}</p>
+                    <p className="staff-detail-dept">{selectedEmployee.department || "No department set"}</p>
+                    <span className="status-pill staff-detail-type-pill">
+                      {selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="staff-basic-info-card">
+                  <div className="staff-basic-info-head">
+                    <h4>Basic info</h4>
+                    <span className="staff-basic-info-kicker">Profile</span>
+                  </div>
+                  <div className="staff-basic-info-grid">
+                    <div>
+                      <small>Full name</small>
+                      <strong>{selectedEmployee.name}</strong>
+                    </div>
+                    <div>
+                      <small>Position</small>
+                      <strong>{selectedEmployee.position}</strong>
+                    </div>
+                    <div>
+                      <small>Department</small>
+                      <strong>{selectedEmployee.department || "—"}</strong>
+                    </div>
+                    <div>
+                      <small>Employment type</small>
+                      <strong>{selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}</strong>
+                    </div>
+                    <div>
+                      <small>Birthday</small>
+                      <strong>
+                        {selectedEmployee.birthday
+                          ? dayjs(selectedEmployee.birthday).format("MMM D, YYYY")
+                          : "—"}
+                      </strong>
+                    </div>
+                    <div>
+                      <small>Gmail / email</small>
+                      <strong>
+                        {selectedEmployee.email ? (
+                          <a className="staff-contact-link" href={`mailto:${selectedEmployee.email}`}>
+                            {selectedEmployee.email}
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </strong>
+                    </div>
+                    <div>
+                      <small>Contact no.</small>
+                      <strong>
+                        {selectedEmployee.contactNo ? (
+                          <a className="staff-contact-link" href={`tel:${String(selectedEmployee.contactNo).replace(/\s/g, "")}`}>
+                            {selectedEmployee.contactNo}
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </strong>
+                    </div>
+                    <div className="staff-basic-info-span">
+                      <small>Address</small>
+                      <strong className="staff-address-block">
+                        {selectedEmployee.address?.trim() ? selectedEmployee.address : "—"}
+                      </strong>
+                    </div>
+                    <div className="staff-basic-info-span">
+                      <small>Staff record ID</small>
+                      <strong className="staff-id-mono">{selectedEmployee.id}</strong>
+                    </div>
+                  </div>
                 </div>
               </article>
-            </div>
+            )}
+
+            {employeePage === "detail" && !selectedEmployee && (
+              <article className="panel">
+                <p className="modal-hint">This staff member is no longer in the list.</p>
+                <button type="button" onClick={() => applyAndPushNav({ employeePage: "list", selectedEmployeeId: null })}>
+                  Back to staff directory
+                </button>
+              </article>
+            )}
           </section>
         )}
       </main>
 
       {modalType === "task" && (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
             <h3>{editingTaskId ? "Edit batch" : "Add batch"}</h3>
             <form
-              className="modal-form"
+              className="modal-form modal-form--compact"
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
@@ -1612,22 +2958,62 @@ function App() {
                 }
               }}
             >
-              <label>Date (required)</label>
-              <input type="date" value={newTask.batchDate} onChange={(e) => setNewTask({ ...newTask, batchDate: e.target.value })} required />
-              <label>Title</label>
-              <input value={newTask.title} onChange={(e) => setNewTask({ ...newTask, title: e.target.value })} required />
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="task-batch-date">Batch date</label>
+                  <input
+                    id="task-batch-date"
+                    type="date"
+                    value={newTask.batchDate}
+                    onChange={(e) => setNewTask({ ...newTask, batchDate: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="task-title">Title</label>
+                  <input
+                    id="task-title"
+                    value={newTask.title}
+                    onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
               {!editingTaskId && (
                 <>
-                  <label>Assigned Staff</label>
-                  <input value={newTask.assignedStaff} onChange={(e) => setNewTask({ ...newTask, assignedStaff: e.target.value })} />
-                  <label>Note</label>
-                  <input value={newTask.note} onChange={(e) => setNewTask({ ...newTask, note: e.target.value })} />
+                  <div className="modal-field">
+                    <label htmlFor="task-staff">Assigned staff</label>
+                    <select
+                      id="task-staff"
+                      value={newTask.assignedStaff}
+                      onChange={(e) => setNewTask({ ...newTask, assignedStaff: e.target.value })}
+                    >
+                      <option value="">Unassigned</option>
+                      {employeesSorted.map((emp) => (
+                        <option key={emp.id} value={emp.name}>
+                          {emp.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="modal-field modal-field--task-note">
+                    <label htmlFor="task-note">Note</label>
+                    <textarea
+                      id="task-note"
+                      rows={5}
+                      placeholder="Initial handoff, courier, or other details…"
+                      value={newTask.note}
+                      onChange={(e) => setNewTask({ ...newTask, note: e.target.value })}
+                    />
+                  </div>
                 </>
               )}
               {editingTaskId && <p className="modal-hint">Stage updates stay on the batch detail view.</p>}
               {taskModalError && <p className="form-error">{taskModalError}</p>}
               <div className="modal-actions">
-                <button type="button" onClick={closeModal}>Cancel</button>
+                <button type="button" onClick={closeModal}>
+                  Cancel
+                </button>
                 <button type="submit">{editingTaskId ? "Save changes" : "Add batch"}</button>
               </div>
             </form>
@@ -1637,7 +3023,7 @@ function App() {
 
       {showFinalStepConfirm && selectedTask && (
         <div className="modal-backdrop" onClick={() => setShowFinalStepConfirm(false)}>
-          <div className="modal final-submit-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--compact final-submit-modal" onClick={(e) => e.stopPropagation()}>
             <div className="final-submit-head">
               <span className="final-step-check" aria-hidden="true">✓</span>
               <div>
@@ -1672,10 +3058,10 @@ function App() {
 
       {modalType === "ob" && (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
             <h3>{editingObId ? "Edit slip" : "Add slip"}</h3>
             <form
-              className="modal-form"
+              className="modal-form modal-form--compact"
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
@@ -1693,6 +3079,7 @@ function App() {
                     purpose: "",
                     timeIn: "08:00",
                     timeOut: "17:00",
+                    employeeId: "",
                   });
                   await loadAll();
                 } catch {
@@ -1700,22 +3087,110 @@ function App() {
                 }
               }}
             >
-              <label>Date</label>
-              <input type="date" value={newSlip.date} onChange={(e) => setNewSlip({ ...newSlip, date: e.target.value })} required />
-              <label>Name</label>
-              <input value={newSlip.name} onChange={(e) => setNewSlip({ ...newSlip, name: e.target.value })} required />
-              <label>Position</label>
-              <input value={newSlip.position} onChange={(e) => setNewSlip({ ...newSlip, position: e.target.value })} required />
-              <label>Department</label>
-              <input value={newSlip.department} onChange={(e) => setNewSlip({ ...newSlip, department: e.target.value })} />
-              <label>Purpose</label>
-              <input value={newSlip.purpose} onChange={(e) => setNewSlip({ ...newSlip, purpose: e.target.value })} required />
-              <label>Time In</label>
-              <input type="time" value={newSlip.timeIn} onChange={(e) => setNewSlip({ ...newSlip, timeIn: e.target.value })} />
-              <label>Time Out</label>
-              <input type="time" value={newSlip.timeOut} onChange={(e) => setNewSlip({ ...newSlip, timeOut: e.target.value })} />
+              <div className="modal-field">
+                <label htmlFor="ob-modal-employee">Employee name</label>
+                <select
+                  id="ob-modal-employee"
+                  value={newSlip.employeeId || ""}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) {
+                      setNewSlip({ ...newSlip, employeeId: "" });
+                      return;
+                    }
+                    const emp = employees.find((x) => x.id === id);
+                    if (!emp) return;
+                    setNewSlip({
+                      ...newSlip,
+                      employeeId: id,
+                      name: emp.name,
+                      position: emp.position,
+                      department: emp.department || "COMELEC",
+                    });
+                  }}
+                >
+                  <option value="">Manual entry (type below)</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="modal-hint">Choose a roster employee to fill name, position, and department.</p>
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-date">Date</label>
+                  <input
+                    id="ob-slip-date"
+                    type="date"
+                    value={newSlip.date}
+                    onChange={(e) => setNewSlip({ ...newSlip, date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-name">Name</label>
+                  <input
+                    id="ob-slip-name"
+                    value={newSlip.name}
+                    onChange={(e) => setNewSlip({ ...newSlip, name: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-position">Position</label>
+                  <input
+                    id="ob-slip-position"
+                    value={newSlip.position}
+                    onChange={(e) => setNewSlip({ ...newSlip, position: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-dept">Department</label>
+                  <input
+                    id="ob-slip-dept"
+                    value={newSlip.department}
+                    onChange={(e) => setNewSlip({ ...newSlip, department: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ob-slip-purpose">Purpose</label>
+                <input
+                  id="ob-slip-purpose"
+                  value={newSlip.purpose}
+                  onChange={(e) => setNewSlip({ ...newSlip, purpose: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-in">Time in</label>
+                  <input
+                    id="ob-slip-in"
+                    type="time"
+                    value={newSlip.timeIn}
+                    onChange={(e) => setNewSlip({ ...newSlip, timeIn: e.target.value })}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ob-slip-out">Time out</label>
+                  <input
+                    id="ob-slip-out"
+                    type="time"
+                    value={newSlip.timeOut}
+                    onChange={(e) => setNewSlip({ ...newSlip, timeOut: e.target.value })}
+                  />
+                </div>
+              </div>
               <div className="modal-actions">
-                <button type="button" onClick={closeModal}>Cancel</button>
+                <button type="button" onClick={closeModal}>
+                  Cancel
+                </button>
                 <button type="submit">{editingObId ? "Save changes" : "Save slip"}</button>
               </div>
             </form>
@@ -1725,10 +3200,10 @@ function App() {
 
       {modalType === "event" && (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
             <h3>{editingEventId ? "Edit event" : "Add event"}</h3>
             <form
-              className="modal-form"
+              className="modal-form modal-form--compact"
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
@@ -1745,16 +3220,49 @@ function App() {
                 }
               }}
             >
-              <label>Event Title</label>
-              <input value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} required />
-              <label>Date</label>
-              <input type="date" value={newEvent.date} onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })} required />
-              <label>Time</label>
-              <input type="time" value={newEvent.time} onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })} />
-              <label>Description</label>
-              <input value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} />
+              <div className="modal-field">
+                <label htmlFor="ev-title">Event title</label>
+                <input
+                  id="ev-title"
+                  value={newEvent.title}
+                  onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ev-date">Date</label>
+                  <input
+                    id="ev-date"
+                    type="date"
+                    value={newEvent.date}
+                    onChange={(e) => setNewEvent({ ...newEvent, date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ev-time">Time</label>
+                  <input
+                    id="ev-time"
+                    type="time"
+                    value={newEvent.time}
+                    onChange={(e) => setNewEvent({ ...newEvent, time: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ev-desc">Description (optional)</label>
+                <textarea
+                  id="ev-desc"
+                  rows={2}
+                  value={newEvent.description}
+                  onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                />
+              </div>
               <div className="modal-actions">
-                <button type="button" onClick={closeModal}>Cancel</button>
+                <button type="button" onClick={closeModal}>
+                  Cancel
+                </button>
                 <button type="submit">{editingEventId ? "Save changes" : "Add event"}</button>
               </div>
             </form>
@@ -1764,10 +3272,10 @@ function App() {
 
       {modalType === "employee" && (
         <div className="modal-backdrop" onClick={closeModal}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
             <h3>{editingEmployeeId ? "Edit employee" : "Add employee"}</h3>
             <form
-              className="modal-form"
+              className="modal-form modal-form--compact"
               onSubmit={async (e) => {
                 e.preventDefault();
                 try {
@@ -1777,26 +3285,110 @@ function App() {
                     await postData("/employees", newEmployee);
                   }
                   closeModal();
-                  setNewEmployee({ name: "", position: "", type: "full-time", department: "COMELEC" });
+                  setNewEmployee({
+                    name: "",
+                    position: "",
+                    type: "full-time",
+                    department: "COMELEC",
+                    birthday: "",
+                    email: "",
+                    contactNo: "",
+                    address: "",
+                  });
                   await loadAll();
                 } catch {
                   setBackendOffline(true);
                 }
               }}
             >
-              <label>Full Name</label>
-              <input value={newEmployee.name} onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })} required />
-              <label>Position</label>
-              <input value={newEmployee.position} onChange={(e) => setNewEmployee({ ...newEmployee, position: e.target.value })} required />
-              <label>Department</label>
-              <input value={newEmployee.department} onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })} />
-              <label>Employment Type</label>
-              <select value={newEmployee.type} onChange={(e) => setNewEmployee({ ...newEmployee, type: e.target.value })}>
-                <option value="full-time">Full-Time</option>
-                <option value="part-time">Part-Time</option>
-              </select>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="emp-name">Full name</label>
+                  <input
+                    id="emp-name"
+                    value={newEmployee.name}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="emp-position">Position</label>
+                  <input
+                    id="emp-position"
+                    value={newEmployee.position}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, position: e.target.value })}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="emp-dept">Department</label>
+                  <input
+                    id="emp-dept"
+                    value={newEmployee.department}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="emp-type">Employment type</label>
+                  <select
+                    id="emp-type"
+                    value={newEmployee.type}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, type: e.target.value })}
+                  >
+                    <option value="full-time">Full-Time</option>
+                    <option value="part-time">Part-Time</option>
+                  </select>
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="emp-bday">Birthday (optional)</label>
+                <input
+                  id="emp-bday"
+                  type="date"
+                  value={newEmployee.birthday || ""}
+                  onChange={(e) => setNewEmployee({ ...newEmployee, birthday: e.target.value })}
+                />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="emp-email">Gmail / email (optional)</label>
+                  <input
+                    id="emp-email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="name@gmail.com"
+                    value={newEmployee.email || ""}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="emp-phone">Contact no. (optional)</label>
+                  <input
+                    id="emp-phone"
+                    type="tel"
+                    autoComplete="tel"
+                    placeholder="09XX XXX XXXX"
+                    value={newEmployee.contactNo || ""}
+                    onChange={(e) => setNewEmployee({ ...newEmployee, contactNo: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="emp-addr">Address (optional)</label>
+                <textarea
+                  id="emp-addr"
+                  rows={2}
+                  placeholder="Street, barangay, city"
+                  value={newEmployee.address || ""}
+                  onChange={(e) => setNewEmployee({ ...newEmployee, address: e.target.value })}
+                />
+              </div>
               <div className="modal-actions">
-                <button type="button" onClick={closeModal}>Cancel</button>
+                <button type="button" onClick={closeModal}>
+                  Cancel
+                </button>
                 <button type="submit">{editingEmployeeId ? "Save changes" : "Add employee"}</button>
               </div>
             </form>

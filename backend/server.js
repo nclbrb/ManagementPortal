@@ -5,10 +5,46 @@ const { Server } = require("socket.io");
 const { Low } = require("lowdb");
 const { JSONFile } = require("lowdb/node");
 const dayjs = require("dayjs");
+const Holidays = require("date-holidays");
 const multer = require("multer");
 const { v4: uuid } = require("uuid");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+
+/** Philippines national calendar — `date-holidays` country code PH */
+const phHolidays = new Holidays("PH");
+
+function getPhilippinesHolidayRollup() {
+  const y = dayjs().year();
+  const out = [];
+  for (let yr = y - 1; yr <= y + 2; yr++) {
+    const rows = phHolidays.getHolidays(yr);
+    if (!rows) continue;
+    for (const row of rows) {
+      const t = row.type || "public";
+      if (t !== "public" && t !== "bank") continue;
+      const raw = row.date instanceof Date ? row.date : new Date(row.date);
+      if (Number.isNaN(raw.getTime())) continue;
+      out.push({
+        date: dayjs(raw).format("YYYY-MM-DD"),
+        name: row.name || "Holiday",
+        type: t,
+      });
+    }
+  }
+  const seen = new Set();
+  return out.filter((h) => {
+    const k = `${h.date}|${h.name}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+function activeEvent(e) {
+  return !e.archived;
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -22,11 +58,6 @@ const upload = multer({ dest: uploadsDir });
 // Allow browser dev servers (Vite, preview, etc.) — reflect request Origin
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "5mb" }));
-
-/** Quick check that frontend can reach the backend */
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "comelec-api", port: PORT });
-});
 
 const taskStages = [
   "Collected",
@@ -44,6 +75,8 @@ const db = new Low(adapter, {
   obSlips: [],
   tasks: [],
   taskLogs: [],
+  users: [],
+  sessions: [],
 });
 
 function todayDate() {
@@ -128,23 +161,69 @@ function parseCsv(text) {
   return rows;
 }
 
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hashBuf = crypto.scryptSync(String(password), salt, 64);
+  return { salt, hash: hashBuf.toString("hex") };
+}
+
+function verifyPassword(password, salt, hashHex) {
+  try {
+    const hashBuf = Buffer.from(hashHex, "hex");
+    const verifyBuf = crypto.scryptSync(String(password), salt, 64);
+    if (hashBuf.length !== verifyBuf.length) return false;
+    return crypto.timingSafeEqual(hashBuf, verifyBuf);
+  } catch {
+    return false;
+  }
+}
+
+function newSessionToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const auth = req.headers.authorization || "";
+    const m = auth.match(/^Bearer\s+(\S+)/i);
+    if (!m) return res.status(401).json({ error: "Sign in required." });
+    await db.read();
+    db.data.sessions ||= [];
+    const token = m[1].trim();
+    const sess = db.data.sessions.find((s) => s.token === token);
+    if (!sess) return res.status(401).json({ error: "Session expired." });
+    const user = db.data.users.find((u) => u.id === sess.userId);
+    if (!user) return res.status(401).json({ error: "User not found." });
+    req.authUser = { id: user.id, email: user.email, name: user.name };
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function bootstrap() {
   if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
   await db.read();
-  db.data ||= { employees: [], events: [], obSlips: [], tasks: [], taskLogs: [] };
+  db.data ||= { employees: [], events: [], obSlips: [], tasks: [], taskLogs: [], users: [], sessions: [] };
   db.data.taskLogs ||= [];
+  db.data.users ||= [];
+  db.data.sessions ||= [];
 
-  // Keep employee list empty on first run; do not inject sample names.
-
-  if (db.data.tasks.length === 0) {
-    db.data.tasks.push({
-      id: uuid(),
-      title: "Batch A-001",
-      batchDate: todayDate(),
-      currentStage: 0,
-      updates: [{ stage: 0, status: "done", assignedStaff: "Courier Team", note: "Initial collection done.", at: new Date().toISOString() }],
-    });
+  for (const ev of db.data.events) {
+    if (ev.archived === undefined) ev.archived = false;
   }
+  for (const emp of db.data.employees) {
+    if (emp.birthday === undefined) emp.birthday = "";
+    if (emp.email === undefined) emp.email = "";
+    if (emp.contactNo === undefined) emp.contactNo = "";
+    if (emp.address === undefined) emp.address = "";
+  }
+  for (const slip of db.data.obSlips) {
+    if (slip.archived === undefined) slip.archived = false;
+    if (slip.employeeId === undefined) slip.employeeId = "";
+  }
+  // Keep employee list empty on first run; do not inject sample names.
+  // No seed tasks — empty `tasks` stays empty until users create batches.
 
   await db.write();
 }
@@ -156,6 +235,8 @@ function emitRealtime() {
     employees: db.data.employees,
     events: db.data.events,
     obSlips: db.data.obSlips,
+    holidays: getPhilippinesHolidayRollup(),
+    holidaysGeneratedAt: new Date().toISOString(),
   });
 }
 
@@ -206,11 +287,12 @@ function getDashboardData() {
   );
 
   const weekStart = now.subtract(6, "day").format("YYYY-MM-DD");
-  const weekOBSlips = db.data.obSlips.filter((s) => s.date >= weekStart && s.date <= today).length;
-  const weekEvents = db.data.events.filter((e) => e.date >= weekStart && e.date <= today).length;
+  const obActive = (s) => !s.archived;
+  const weekOBSlips = db.data.obSlips.filter((s) => obActive(s) && s.date >= weekStart && s.date <= today).length;
+  const weekEvents = db.data.events.filter((e) => activeEvent(e) && e.date >= weekStart && e.date <= today).length;
 
   const upcomingEvents = db.data.events
-    .filter((e) => e.date >= today)
+    .filter((e) => activeEvent(e) && e.date >= today)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
     .slice(0, 6)
     .map((e) => {
@@ -257,18 +339,19 @@ function getDashboardData() {
       text: `${completionRate}% of batches reached Final Filing. Keep the pipeline moving.`,
     });
   }
-  if (db.data.events.filter((e) => e.date === today).length > 0) {
+  const todayActiveEvents = db.data.events.filter((e) => activeEvent(e) && e.date === today).length;
+  if (todayActiveEvents > 0) {
     insights.push({
       type: "info",
-      text: `You have ${db.data.events.filter((e) => e.date === today).length} calendar event(s) today.`,
+      text: `You have ${todayActiveEvents} calendar event(s) today.`,
     });
   }
 
   return {
     employees: db.data.employees.length,
     employeesByType,
-    todayEvents: db.data.events.filter((e) => e.date === today).length,
-    todayOBSlips: db.data.obSlips.filter((s) => s.date === today).length,
+    todayEvents: todayActiveEvents,
+    todayOBSlips: db.data.obSlips.filter((s) => obActive(s) && s.date === today).length,
     weekOBSlips,
     weekEvents,
     tasks: taskTotals,
@@ -284,9 +367,107 @@ function getDashboardData() {
   };
 }
 
+const publicApiPaths = new Set(["/api/health", "/api/auth/signup", "/api/auth/login"]);
+
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api")) return next();
+  if (req.method === "OPTIONS") return next();
+  if (publicApiPaths.has(req.path)) return next();
+  return requireAuth(req, res, next);
+});
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "comelec-api", port: PORT });
+});
+
+app.post("/api/auth/signup", async (req, res) => {
+  try {
+    const { email, password, name } = req.body;
+    const em = String(email || "").trim().toLowerCase();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      return res.status(400).json({ error: "Valid email is required." });
+    }
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters." });
+    }
+    await db.read();
+    db.data.users ||= [];
+    if (db.data.users.some((u) => String(u.email).toLowerCase() === em)) {
+      return res.status(400).json({ error: "That email is already registered." });
+    }
+    const { salt, hash } = hashPassword(password);
+    const user = {
+      id: uuid(),
+      email: em,
+      salt,
+      passwordHash: hash,
+      name: String(name || "").trim() || em.split("@")[0],
+      createdAt: new Date().toISOString(),
+    };
+    db.data.users.push(user);
+    const token = newSessionToken();
+    db.data.sessions ||= [];
+    db.data.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() });
+    if (db.data.sessions.length > 400) db.data.sessions = db.data.sessions.slice(-400);
+    await db.write();
+    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Could not create account." });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const em = String(email || "").trim().toLowerCase();
+    await db.read();
+    const user = db.data.users.find((u) => String(u.email).toLowerCase() === em);
+    if (!user || !verifyPassword(password, user.salt, user.passwordHash)) {
+      return res.status(401).json({ error: "Invalid email or password." });
+    }
+    const token = newSessionToken();
+    db.data.sessions ||= [];
+    db.data.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() });
+    if (db.data.sessions.length > 400) db.data.sessions = db.data.sessions.slice(-400);
+    await db.write();
+    res.json({ token, user: { id: user.id, email: user.email, name: user.name } });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Could not sign in." });
+  }
+});
+
+app.get("/api/auth/me", (req, res) => {
+  res.json(req.authUser);
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  try {
+    const m = (req.headers.authorization || "").match(/^Bearer\s+(\S+)/i);
+    if (!m) return res.status(400).json({ error: "No session token." });
+    const token = m[1].trim();
+    await db.read();
+    db.data.sessions = (db.data.sessions || []).filter((s) => s.token !== token);
+    await db.write();
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "Could not sign out." });
+  }
+});
+
 app.get("/api/dashboard", async (_req, res) => {
   await db.read();
   res.json(getDashboardData());
+});
+
+app.get("/api/holidays", async (_req, res) => {
+  res.json({
+    country: "PH",
+    holidays: getPhilippinesHolidayRollup(),
+    generatedAt: new Date().toISOString(),
+  });
 });
 
 app.get("/api/employees", async (req, res) => {
@@ -298,8 +479,18 @@ app.get("/api/employees", async (req, res) => {
 
 app.post("/api/employees", async (req, res) => {
   await db.read();
-  const { name, position, type, department = "COMELEC" } = req.body;
-  const employee = { id: uuid(), name, position, type, department };
+  const { name, position, type, department = "COMELEC", birthday, email, contactNo, address } = req.body;
+  const employee = {
+    id: uuid(),
+    name: String(name || "").trim(),
+    position: String(position || "").trim(),
+    type,
+    department: String(department || "").trim() || "COMELEC",
+    birthday: birthday != null && String(birthday).trim() ? String(birthday).trim() : "",
+    email: email != null ? String(email).trim() : "",
+    contactNo: contactNo != null ? String(contactNo).trim() : "",
+    address: address != null ? String(address).trim() : "",
+  };
   db.data.employees.push(employee);
   await db.write();
   emitRealtime();
@@ -310,7 +501,7 @@ app.patch("/api/employees/:id", async (req, res) => {
   await db.read();
   const emp = db.data.employees.find((e) => e.id === req.params.id);
   if (!emp) return res.status(404).json({ error: "Employee not found." });
-  const { name, position, type, department } = req.body;
+  const { name, position, type, department, birthday, email, contactNo, address } = req.body;
   if (name !== undefined) emp.name = String(name).trim();
   if (position !== undefined) emp.position = String(position).trim();
   if (type !== undefined) {
@@ -320,6 +511,16 @@ app.patch("/api/employees/:id", async (req, res) => {
     emp.type = type;
   }
   if (department !== undefined) emp.department = String(department).trim() || "COMELEC";
+  if (birthday !== undefined) {
+    const b = String(birthday).trim();
+    if (b && !/^\d{4}-\d{2}-\d{2}$/.test(b)) {
+      return res.status(400).json({ error: "Birthday must be YYYY-MM-DD or empty." });
+    }
+    emp.birthday = b;
+  }
+  if (email !== undefined) emp.email = String(email).trim();
+  if (contactNo !== undefined) emp.contactNo = String(contactNo).trim();
+  if (address !== undefined) emp.address = String(address).trim();
   await db.write();
   emitRealtime();
   res.json(emp);
@@ -354,11 +555,12 @@ app.patch("/api/events/:id", async (req, res) => {
   await db.read();
   const ev = db.data.events.find((e) => e.id === req.params.id);
   if (!ev) return res.status(404).json({ error: "Event not found." });
-  const { title, date, time, description } = req.body;
+  const { title, date, time, description, archived } = req.body;
   if (title !== undefined) ev.title = String(title).trim();
   if (date !== undefined) ev.date = String(date).trim();
   if (time !== undefined) ev.time = String(time).trim();
   if (description !== undefined) ev.description = String(description);
+  if (archived !== undefined) ev.archived = Boolean(archived);
   await db.write();
   emitRealtime();
   res.json(ev);
@@ -402,7 +604,7 @@ app.patch("/api/ob-slips/:id", async (req, res) => {
   await db.read();
   const slip = db.data.obSlips.find((s) => s.id === req.params.id);
   if (!slip) return res.status(404).json({ error: "OB slip not found." });
-  const { date, name, position, department, purpose, timeIn, timeOut } = req.body;
+  const { date, name, position, department, purpose, timeIn, timeOut, archived, employeeId } = req.body;
   if (date !== undefined) slip.date = String(date).trim();
   if (name !== undefined) slip.name = String(name).trim();
   if (position !== undefined) slip.position = String(position).trim();
@@ -410,6 +612,8 @@ app.patch("/api/ob-slips/:id", async (req, res) => {
   if (purpose !== undefined) slip.purpose = String(purpose).trim();
   if (timeIn !== undefined) slip.timeIn = String(timeIn).trim();
   if (timeOut !== undefined) slip.timeOut = String(timeOut).trim();
+  if (archived !== undefined) slip.archived = Boolean(archived);
+  if (employeeId !== undefined) slip.employeeId = String(employeeId || "").trim();
   await db.write();
   emitRealtime();
   res.json(slip);
@@ -425,13 +629,29 @@ app.delete("/api/ob-slips/:id", async (req, res) => {
   res.status(204).end();
 });
 
-app.get("/api/ob-slips/export-excel", async (_req, res) => {
+app.get("/api/ob-slips/export-excel", async (req, res) => {
   await db.read();
-  const headers = ["Date", "Name", "Position", "Department", "Purpose", "Time In", "Time Out"];
+  let slips = db.data.obSlips;
+  const rawIds = req.query.ids;
+  if (rawIds != null && String(rawIds).trim()) {
+    const idSet = new Set(
+      String(rawIds)
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    );
+    slips = db.data.obSlips.filter((s) => idSet.has(s.id));
+    if (slips.length === 0) {
+      return res.status(400).json({ error: "No slips match the selected IDs." });
+    }
+  }
+  const headers = ["Date", "Name", "Position", "Department", "Purpose", "Time In", "Time Out", "EmployeeId", "Archived"];
   const lines = [
     headers.join(","),
-    ...db.data.obSlips.map((s) =>
-      [s.date, s.name, s.position, s.department, s.purpose, s.timeIn, s.timeOut].map(csvEscape).join(",")
+    ...slips.map((s) =>
+      [s.date, s.name, s.position, s.department, s.purpose, s.timeIn, s.timeOut, s.employeeId || "", s.archived ? "true" : "false"]
+        .map(csvEscape)
+        .join(",")
     ),
   ];
   const bom = "\uFEFF";
@@ -486,6 +706,8 @@ app.post("/api/ob-slips/import-excel", upload.single("file"), async (req, res) =
       timeIn: String(row[5] ?? "").trim() || "08:00",
       timeOut: String(row[6] ?? "").trim() || "17:00",
       createdAt: new Date().toISOString(),
+      employeeId: row.length > 7 ? String(row[7] ?? "").trim() : "",
+      archived: row.length > 8 && /^(true|1|yes)$/i.test(String(row[8] ?? "").trim()),
     };
     db.data.obSlips.push(slip);
     added.push(slip);
@@ -509,6 +731,11 @@ app.post("/api/tasks", async (req, res) => {
   const { title, assignedStaff = "Unassigned", note = "", batchDate = todayDate() } = req.body;
   if (!title || !String(title).trim()) {
     return res.status(400).json({ error: "Batch name is required." });
+  }
+  const titleNorm = String(title).trim().toLowerCase();
+  const titleTaken = db.data.tasks.some((t) => String(t.title || "").trim().toLowerCase() === titleNorm);
+  if (titleTaken) {
+    return res.status(400).json({ error: "A batch with this title already exists. Use a unique name." });
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(batchDate))) {
     return res.status(400).json({ error: "Batch date must be in YYYY-MM-DD format." });
@@ -541,6 +768,11 @@ app.patch("/api/tasks/:id", async (req, res) => {
   if (title !== undefined) {
     const t = String(title).trim();
     if (!t) return res.status(400).json({ error: "Title cannot be empty." });
+    const tNorm = t.toLowerCase();
+    const taken = db.data.tasks.some((x) => x.id !== task.id && String(x.title || "").trim().toLowerCase() === tNorm);
+    if (taken) {
+      return res.status(400).json({ error: "A batch with this title already exists. Use a unique name." });
+    }
     task.title = t;
   }
   if (batchDate !== undefined) {
