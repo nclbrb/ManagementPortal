@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import dayjs from "dayjs";
 import { SOCKET_URL, apiUrl, AUTH_STORAGE_KEY, getAuthHeaders } from "./apiConfig.js";
+import comelecLogo from "./assets/comelec.png";
 
 async function jsonFetch(url, options = {}) {
   const r = await fetch(url, {
@@ -65,56 +66,80 @@ function AuthGate({ mode, setMode, email, setEmail, password, setPassword, name,
 
   return (
     <div className="auth-gate">
-      <div className="auth-gate-card">
-        <header className="auth-gate-head">
-          <span className="auth-gate-badge">COMELEC</span>
-          <h1>Management portal</h1>
-          <p>Sign in to access tasks, OB slips, calendar, and staff records.</p>
-        </header>
-        <div className="auth-gate-tabs">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>
-            Log in
-          </button>
-          <button type="button" className={mode === "signup" ? "active" : ""} onClick={() => { setMode("signup"); setError(""); }}>
-            Sign up
-          </button>
-        </div>
-        {mode === "login" ? (
-          <form className="auth-gate-form" onSubmit={submitLogin}>
-            <label>
-              Email
-              <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </label>
-            <label>
-              Password
-              <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-            </label>
-            {error ? <p className="form-error auth-gate-error">{error}</p> : null}
-            <button type="submit" className="auth-gate-submit" disabled={busy}>
-              {busy ? "Signing in…" : "Log in"}
-            </button>
-          </form>
-        ) : (
-          <form className="auth-gate-form" onSubmit={submitSignup}>
-            <label>
-              Display name
-              <input type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Juan Dela Cruz" />
-            </label>
-            <label>
-              Email
-              <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </label>
-            <label>
-              Password
-              <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-            </label>
-            <p className="auth-gate-hint">Password must be at least 6 characters.</p>
-            {error ? <p className="form-error auth-gate-error">{error}</p> : null}
-            <button type="submit" className="auth-gate-submit" disabled={busy}>
-              {busy ? "Creating account…" : "Create account"}
-            </button>
-          </form>
-        )}
+      <div className="auth-gate-shell">
+        <aside className="auth-gate-brand">
+          <div className="auth-gate-brand-logo" role="img" aria-label="COMELEC logo" />
+          <p className="auth-gate-brand-tag">COMELEC • Republic of the Philippines</p>
+          <h1>Management Portal</h1>
+          <p className="auth-gate-brand-sub">Commission on Elections</p>
+          <p className="auth-gate-brand-sub2">Staff and Operations System</p>
+          <div className="auth-gate-brand-pills">
+            <span>Tasks</span>
+            <span>OB Slips</span>
+            <span>Calendar</span>
+          </div>
+        </aside>
+
+        <section className="auth-gate-card">
+          <header className="auth-gate-head">
+            <span className="auth-gate-badge">COMELEC ACCESS</span>
+            <h2>{mode === "login" ? "Admin Login" : "Create Account"}</h2>
+            <p className="auth-gate-subtitle">
+              {mode === "login"
+                ? "Please enter your credentials to access the COMELEC management dashboard."
+                : "Set up your account credentials to start using the management portal."}
+            </p>
+          </header>
+
+          {mode === "login" ? (
+            <form className="auth-gate-form" onSubmit={submitLogin}>
+              <label>
+                Email Address
+                <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </label>
+              <label>
+                Security Password
+                <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              </label>
+              {error ? <p className="form-error auth-gate-error">{error}</p> : null}
+              <button type="submit" className="auth-gate-submit" disabled={busy}>
+                {busy ? "Signing in..." : "Sign in to Console"}
+              </button>
+              <p className="auth-gate-switch">
+                No account yet?{" "}
+                <button type="button" onClick={() => { setMode("signup"); setError(""); }}>
+                  Sign up
+                </button>
+              </p>
+            </form>
+          ) : (
+            <form className="auth-gate-form" onSubmit={submitSignup}>
+              <label>
+                Display Name
+                <input type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Juan Dela Cruz" />
+              </label>
+              <label>
+                Email Address
+                <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              </label>
+              <label>
+                Security Password
+                <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              </label>
+              <p className="auth-gate-hint">Password must be at least 6 characters.</p>
+              {error ? <p className="form-error auth-gate-error">{error}</p> : null}
+              <button type="submit" className="auth-gate-submit" disabled={busy}>
+                {busy ? "Creating account..." : "Create Account"}
+              </button>
+              <p className="auth-gate-switch">
+                Already have an account?{" "}
+                <button type="button" onClick={() => { setMode("login"); setError(""); }}>
+                  Log in
+                </button>
+              </p>
+            </form>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -138,15 +163,60 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-/** Printable OB slip — layout tuned for A4 / letter and browser print dialog */
-function buildObSlipPrintHtml(slip) {
-  const date = escapeHtml(slip.date);
-  const name = escapeHtml(slip.name);
-  const position = escapeHtml(slip.position);
-  const department = escapeHtml(slip.department);
-  const purpose = escapeHtml(slip.purpose);
-  const timeIn = escapeHtml(slip.timeIn);
-  const timeOut = escapeHtml(slip.timeOut);
+/** Printable OB slip — prints selected slips, 4 per page */
+function buildObSlipPrintHtml(input) {
+  const logoSrc = escapeHtml(comelecLogo);
+  const slips = (Array.isArray(input) ? input : [input]).filter(Boolean);
+  const makeSlipMarkup = (slip) => {
+    const date = escapeHtml(slip.date);
+    const name = escapeHtml(slip.name);
+    const position = escapeHtml(slip.position);
+    const department = escapeHtml(slip.department || "COMELEC");
+    const purpose = escapeHtml(slip.purpose);
+    const timeIn = escapeHtml(slip.timeIn);
+    const timeOut = escapeHtml(slip.timeOut);
+    return `
+      <section class="ob-slip">
+        <header class="ob-head">
+          <div class="ob-seal-wrap" aria-hidden="true"><img src="${logoSrc}" alt="COMELEC" /></div>
+          <div class="ob-head-text">
+            <p class="ob-line">Republic of the Philippines</p>
+            <p class="ob-line ob-city">CITY OF CABUYAO</p>
+            <p class="ob-line">Province of Laguna</p>
+            <h1>Official Business Slip</h1>
+          </div>
+        </header>
+
+        <div class="ob-body">
+          <div class="ob-row"><span class="label">Date :</span><span class="line">${date}</span></div>
+          <div class="ob-row"><span class="label">Name :</span><span class="line">${name}</span></div>
+          <div class="ob-row"><span class="label">Position :</span><span class="line">${position}</span></div>
+          <div class="ob-row"><span class="label">Department :</span><span class="line">${department}</span></div>
+          <div class="ob-row ob-purpose"><span class="label">Purpose :</span><span class="line">${purpose}</span></div>
+          <div class="ob-row ob-time">
+            <span class="label">Time in :</span><span class="line">${timeIn}</span>
+            <span class="label label-right">Time Out :</span><span class="line">${timeOut}</span>
+          </div>
+
+          <div class="ob-return">
+            <span class="label">Will be back?</span>
+            <span class="check-wrap">YES <span class="check"></span></span>
+            <span class="check-wrap">NO <span class="check"></span></span>
+          </div>
+
+          <div class="ob-row"><span class="label">Received by :</span><span class="line">&nbsp;</span></div>
+          <div class="ob-row"><span class="label">Approved by :</span><span class="line">&nbsp;</span></div>
+          <div class="ob-row"><span class="label">Encoded by :</span><span class="line">&nbsp;</span></div>
+        </div>
+
+        <footer class="ob-foot">
+          <div class="sig-name">ATTY. RALPH JIREH A. BARTOLOME</div>
+          <div class="sig-role">Dept. Head's Signature</div>
+        </footer>
+      </section>`;
+  };
+  const pages = [];
+  for (let i = 0; i < slips.length; i += 4) pages.push(slips.slice(i, i + 4));
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -155,172 +225,138 @@ function buildObSlipPrintHtml(slip) {
   <title>OB Slip - ${name}</title>
   <style>
     * { box-sizing: border-box; }
-    @page { margin: 14mm 12mm; size: auto; }
+    @page { size: Letter portrait; margin: 8mm; }
     @media print {
       body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .no-print { display: none !important; }
     }
     body {
       margin: 0;
       padding: 0;
-      font-family: "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
-      font-size: 11pt;
-      line-height: 1.45;
-      color: #142a44;
-      background: #e8eef5;
-    }
-    .sheet {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 20px 16px 32px;
-      background: #e8eef5;
-    }
-    .card {
+      font-family: Arial, Helvetica, sans-serif;
+      color: #111;
       background: #fff;
-      border-radius: 4px;
-      overflow: hidden;
-      box-shadow: 0 2px 16px rgba(15, 56, 111, 0.12);
-      border: 1px solid #c5d4e8;
+      line-height: 1.25;
     }
-    .masthead {
-      background: linear-gradient(135deg, #0c2d5c 0%, #154a8a 52%, #1a5ba3 100%);
-      color: #f0f6ff;
-      padding: 18px 22px 20px;
-      text-align: center;
-    }
-    .masthead-badge {
-      display: inline-block;
-      font-size: 9pt;
-      font-weight: 700;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      opacity: 0.92;
-      margin-bottom: 6px;
-    }
-    .masthead h1 {
-      margin: 0;
-      font-size: 17pt;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      line-height: 1.2;
-    }
-    .masthead-sub {
-      margin: 8px 0 0;
-      font-size: 9.5pt;
-      opacity: 0.9;
-      font-weight: 500;
-    }
-    .doc-meta {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 12px 22px;
-      background: #f4f8fd;
-      border-bottom: 1px solid #d7e2f0;
-      font-size: 9.5pt;
-      color: #3d5a78;
-    }
-    .doc-meta strong { color: #0f2844; font-weight: 700; }
-    .fields { padding: 6px 0 8px; }
-    .field-row {
-      display: grid;
-      grid-template-columns: 140px 1fr;
-      gap: 0 16px;
-      border-bottom: 1px solid #e8eef5;
-      min-height: 44px;
-      align-items: stretch;
-    }
-    .field-row:last-of-type { border-bottom: none; }
-    .field-label {
-      padding: 12px 22px;
-      font-size: 9pt;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #5a7394;
-      background: #fafcfe;
-      border-right: 1px solid #e8eef5;
-    }
-    .field-value {
-      padding: 12px 22px;
-      font-size: 11pt;
-      color: #142a44;
-      word-break: break-word;
-    }
-    .field-value--block { white-space: pre-wrap; }
-    .signatures {
+    .print-page {
+      width: 100%;
+      min-height: calc(100vh - 1px);
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 24px;
-      padding: 20px 22px 24px;
-      border-top: 1px dashed #c5d4e8;
-      margin-top: 4px;
+      grid-template-rows: 1fr 1fr;
+      gap: 7mm;
+      page-break-after: always;
+      break-after: page;
     }
-    .sig-line {
-      border-top: 1px solid #1a3d66;
-      padding-top: 8px;
-      margin-top: 40px;
-      font-size: 9pt;
-      color: #5a7394;
-      text-align: center;
+    .print-page:last-child { page-break-after: auto; break-after: auto; }
+    .ob-slip {
+      border: 1.4px solid #000;
+      padding: 7mm 6mm 5mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 0;
     }
-    .footer-note {
+    .ob-head {
+      display: grid;
+      grid-template-columns: 20mm 1fr;
+      gap: 3mm;
+      align-items: start;
+      margin-bottom: 3mm;
+    }
+    .ob-seal-wrap {
+      width: 18mm;
+      height: 18mm;
+      display: grid;
+      place-items: center;
+    }
+    .ob-seal-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .ob-head-text { text-align: center; }
+    .ob-line { margin: 0; font-size: 10px; font-weight: 700; }
+    .ob-city { font-size: 12px; letter-spacing: 0.03em; }
+    .ob-head h1 {
+      margin: 3mm 0 0;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .ob-body { display: grid; gap: 2.2mm; margin-top: 1mm; }
+    .ob-row {
+      display: grid;
+      grid-template-columns: 22mm 1fr;
+      align-items: end;
+      gap: 2mm;
+      font-size: 10px;
+    }
+    .ob-row .label { font-weight: 700; }
+    .line {
+      border-bottom: 1px solid #000;
+      min-height: 3.6mm;
+      padding: 0 1mm 0.2mm;
+      font-size: 10px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .ob-purpose .line {
+      white-space: normal;
+      min-height: 8mm;
+      line-height: 1.2;
+      display: flex;
+      align-items: flex-end;
+      padding-top: 0;
+      padding-bottom: 0.6mm;
+    }
+    .ob-time {
+      grid-template-columns: 16mm 1fr 20mm 1fr;
+      gap: 2mm;
+    }
+    .label-right { text-align: right; }
+    .ob-return {
+      display: flex;
+      align-items: center;
+      gap: 4mm;
+      font-size: 10px;
+      margin-top: 0.6mm;
+    }
+    .check-wrap { display: inline-flex; align-items: center; gap: 1.5mm; font-weight: 700; }
+    .check {
+      display: inline-block;
+      width: 6mm;
+      height: 6mm;
+      border: 1px solid #000;
+    }
+    .ob-foot {
+      margin-top: 4.5mm;
       text-align: center;
-      padding: 12px 22px 18px;
-      font-size: 8.5pt;
-      color: #6d819d;
-      background: #f8fafc;
-      border-top: 1px solid #e8eef5;
+      border-top: 1px solid transparent;
+    }
+    .sig-name {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      border-bottom: 1px solid #000;
+      padding-bottom: 1.2mm;
+      margin-top: 5.5mm;
+    }
+    .sig-role {
+      margin-top: 1.2mm;
+      font-size: 10px;
+      font-weight: 700;
     }
   </style>
 </head>
 <body>
-  <div class="sheet">
-    <div class="card">
-      <header class="masthead">
-        <div class="masthead-badge">Official document</div>
-        <h1>Official Business Slip</h1>
-        <p class="masthead-sub">Commission on Elections, Management Portal</p>
-      </header>
-      <div class="doc-meta">
-        <span><strong>Date of travel / business:</strong> ${date}</span>
-        <span><strong>Department:</strong> ${department}</span>
-      </div>
-      <div class="fields">
-        <div class="field-row">
-          <div class="field-label">Name</div>
-          <div class="field-value">${name}</div>
-        </div>
-        <div class="field-row">
-          <div class="field-label">Position</div>
-          <div class="field-value">${position}</div>
-        </div>
-        <div class="field-row">
-          <div class="field-label">Purpose</div>
-          <div class="field-value field-value--block">${purpose}</div>
-        </div>
-        <div class="field-row">
-          <div class="field-label">Time in</div>
-          <div class="field-value">${timeIn}</div>
-        </div>
-        <div class="field-row">
-          <div class="field-label">Time out</div>
-          <div class="field-value">${timeOut}</div>
-        </div>
-      </div>
-      <div class="signatures">
-        <div>
-          <div class="sig-line">Employee signature &amp; date</div>
-        </div>
-        <div>
-          <div class="sig-line">Authorized approving officer</div>
-        </div>
-      </div>
-      <p class="footer-note">Generated from COMELEC Management Portal. This slip is subject to internal policies and verification.</p>
-    </div>
-  </div>
+  ${pages
+    .map(
+      (chunk) => `
+  <div class="print-page">
+    ${chunk.map((s) => makeSlipMarkup(s)).join("\n")}
+  </div>`
+    )
+    .join("\n")}
 </body>
 </html>`;
 }
@@ -419,11 +455,14 @@ function DashboardSection({
   events,
   holidays = [],
   employees = [],
+  taskLogs = [],
   onNavigate,
 }) {
   const todayYmd = dayjs().format("YYYY-MM-DD");
   const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
   const [selectedDate, setSelectedDate] = useState(todayYmd);
+  const dayScrollRef = useRef(null);
+  const recentScrollRef = useRef(null);
 
   const ym = viewMonth;
 
@@ -479,6 +518,7 @@ function DashboardSection({
   const selectedDayEvents = eventsByDate[selectedDate] || [];
   const selectedDayHolidays = holidaysByDate[selectedDate] || [];
   const selectedDayBirthdays = birthdaysByDate[selectedDate] || [];
+  const upcomingFallback = (dashboard.upcomingEvents || []).filter((e) => e.date >= todayYmd).slice(0, 2);
 
   const goPrevMonth = () => {
     const nm = dayjs(`${ym}-01`).subtract(1, "month").format("YYYY-MM");
@@ -503,6 +543,49 @@ function DashboardSection({
   const now = dayjs();
   const greeting =
     now.hour() < 12 ? "Good morning" : now.hour() < 17 ? "Good afternoon" : "Good evening";
+  const [pipelineRange, setPipelineRange] = useState("monthly");
+  const [hoveredStage, setHoveredStage] = useState(null);
+  const pipelineBaseRows = dashboard.tasksByStage || [];
+  const pipelineRows = useMemo(() => {
+    if (!Array.isArray(taskLogs) || taskLogs.length === 0) return pipelineBaseRows;
+    const nowTs = Date.now();
+    const msByRange = {
+      weekly: 7 * 24 * 60 * 60 * 1000,
+      monthly: 30 * 24 * 60 * 60 * 1000,
+      yearly: 365 * 24 * 60 * 60 * 1000,
+    };
+    const cutoff = nowTs - (msByRange[pipelineRange] || msByRange.monthly);
+    const counts = new Map(pipelineBaseRows.map((r) => [r.stageIndex, 0]));
+    for (const log of taskLogs) {
+      const ts = Date.parse(log?.at || "");
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+      let s = Number(log?.details?.stage);
+      if (!Number.isInteger(s)) s = Number(log?.details?.stageIndex);
+      if (!Number.isInteger(s)) continue;
+      if (!counts.has(s)) continue;
+      counts.set(s, (counts.get(s) || 0) + 1);
+    }
+    const total = Array.from(counts.values()).reduce((a, b) => a + b, 0) || 1;
+    return pipelineBaseRows.map((r) => {
+      const c = counts.get(r.stageIndex) || 0;
+      return { ...r, count: c, pct: Math.round((c / total) * 1000) / 10 };
+    });
+  }, [pipelineBaseRows, taskLogs, pipelineRange]);
+  const currentStageCounts = useMemo(
+    () => new Map((dashboard.tasksByStage || []).map((r) => [r.stageIndex, Number(r.count || 0)])),
+    [dashboard.tasksByStage]
+  );
+  const pipelineMax = Math.max(1, ...pipelineRows.map((r) => Number(r.count || 0)));
+  const busiestStage = pipelineRows.reduce((best, row) => (row.count > (best?.count || -1) ? row : best), null);
+  const currentCompleted = (dashboard.tasksByStage || []).slice(-1)[0]?.count || 0;
+
+  useEffect(() => {
+    if (dayScrollRef.current) dayScrollRef.current.scrollTop = 0;
+  }, [selectedDate]);
+
+  useEffect(() => {
+    if (recentScrollRef.current) recentScrollRef.current.scrollTop = 0;
+  }, [dashboardSearch, dashboardRecent.length]);
 
   return (
     <section className="dash-simple">
@@ -586,9 +669,9 @@ function DashboardSection({
           <span className="dash-stat-hint">{dashboard.weekOBSlips ?? 0} in the last 7 days</span>
         </div>
         <div className="dash-stat-card">
-          <span className="dash-stat-label">Events (today)</span>
+          <span className="dash-stat-label">Events + Holidays (today)</span>
           <strong>{dashboard.todayEvents}</strong>
-          <span className="dash-stat-hint">{dashboard.weekEvents ?? 0} this week</span>
+          <span className="dash-stat-hint">{dashboard.weekEvents ?? 0} this week total</span>
         </div>
       </div>
 
@@ -656,57 +739,76 @@ function DashboardSection({
         <div className="dash-data-col">
           <article className="panel dash-panel-day">
             <h3 className="dash-panel-day-title">{dayjs(selectedDate).format("MMM D, YYYY")}</h3>
-
-            {selectedDayHolidays.length > 0 && (
-              <div className="dash-day-section">
-                <h4 className="dash-day-section-title">Philippines holidays</h4>
-                <ul className="dash-day-events dash-day-events--tight">
-                  {selectedDayHolidays.map((h, idx) => (
-                    <li key={`${h.date}-${h.name}-${idx}`}>
-                      <strong>{h.name}</strong>
-                      <span>{h.type === "bank" ? "PH bank" : "PH public"}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {selectedDayBirthdays.length > 0 && (
-              <div className="dash-day-section">
-                <h4 className="dash-day-section-title">Staff birthdays</h4>
-                <ul className="dash-day-events dash-day-events--tight">
-                  {selectedDayBirthdays.map((b) => (
-                    <li key={b.id}>
-                      <strong>{b.name}</strong>
-                      <span>Birthday</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {selectedDayEvents.length > 0 && (
-              <div className="dash-day-section">
-                <h4 className="dash-day-section-title">Events</h4>
-                <ul className="dash-day-events">
-                  {selectedDayEvents.map((ev) => (
-                    <li key={ev.id}>
-                      <strong>{ev.title}</strong>
-                      <span>
-                        {ev.time}
-                        {ev.description ? ` · ${ev.description}` : ""}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {selectedDayHolidays.length === 0 &&
-              selectedDayBirthdays.length === 0 &&
-              selectedDayEvents.length === 0 && (
-                <p className="dash-muted">No Philippines holidays, staff birthdays, or events on this day.</p>
+            <div className="dash-day-scroll" ref={dayScrollRef}>
+              {selectedDayHolidays.length > 0 && (
+                <div className="dash-day-section">
+                  <h4 className="dash-day-section-title">Philippines holidays</h4>
+                  <ul className="dash-day-events dash-day-events--tight">
+                    {selectedDayHolidays.map((h, idx) => (
+                      <li key={`${h.date}-${h.name}-${idx}`}>
+                        <strong>{h.name}</strong>
+                        <span>{h.type === "bank" ? "PH bank" : "PH public"}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
+
+              {selectedDayBirthdays.length > 0 && (
+                <div className="dash-day-section">
+                  <h4 className="dash-day-section-title">Staff birthdays</h4>
+                  <ul className="dash-day-events dash-day-events--tight">
+                    {selectedDayBirthdays.map((b) => (
+                      <li key={b.id}>
+                        <strong>{b.name}</strong>
+                        <span>Birthday</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {selectedDayEvents.length > 0 && (
+                <div className="dash-day-section">
+                  <h4 className="dash-day-section-title">Events</h4>
+                  <ul className="dash-day-events">
+                    {selectedDayEvents.map((ev) => (
+                      <li key={ev.id}>
+                        <strong>{ev.title}</strong>
+                        <span>
+                          {ev.time}
+                          {ev.description ? ` · ${ev.description}` : ""}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {selectedDayHolidays.length === 0 &&
+                selectedDayBirthdays.length === 0 &&
+                selectedDayEvents.length === 0 && (
+                  <div className="dash-day-section">
+                    <p className="dash-muted">No Philippines holidays, staff birthdays, or events on this day.</p>
+                    {upcomingFallback.length > 0 ? (
+                      <>
+                        <h4 className="dash-day-section-title">Upcoming events</h4>
+                        <ul className="dash-day-events dash-day-events--tight">
+                          {upcomingFallback.map((ev) => (
+                            <li key={`upcoming-${ev.id}`}>
+                              <strong>{ev.title}</strong>
+                              <span>
+                                {ev.date}
+                                {ev.time ? ` · ${ev.time}` : ""}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                  </div>
+                )}
+            </div>
 
             <button type="button" className="btn-text dash-link-calendar" onClick={() => onNavigate("Calendar")}>
               Open full calendar →
@@ -723,7 +825,7 @@ function DashboardSection({
                 onChange={(e) => setDashboardSearch(e.target.value)}
               />
             </div>
-            <div className="dash-recent-scroll">
+            <div className="dash-recent-scroll" ref={recentScrollRef}>
               <div className="table dash-recent-table">
                 {dashboardRecent.length === 0 ? (
                   <p className="dash-muted">No batches match your search.</p>
@@ -753,6 +855,69 @@ function DashboardSection({
           </article>
         </div>
       </div>
+
+      <article className="panel dash-stage-panel">
+        <div className="panel-head">
+          <h3>Task Pipeline</h3>
+          <label className="dash-pipe-filter-wrap">
+            <span>Range</span>
+            <select value={pipelineRange} onChange={(e) => setPipelineRange(e.target.value)}>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+        </div>
+        <div className="dash-pipe-kpis">
+          <span>Total: <strong>{dashboard.tasks?.total ?? 0}</strong></span>
+          <span>In Progress: <strong>{dashboard.tasks?.inProgress ?? 0}</strong></span>
+          <span>Completed: <strong>{currentCompleted}</strong></span>
+          <span>Busiest: <strong>{busiestStage ? `${busiestStage.label} (${busiestStage.count})` : "N/A"}</strong></span>
+        </div>
+        <div className="dash-pipe-chart">
+          <div className="dash-pipe-axis">
+            <span>100%</span>
+            <span>50%</span>
+            <span>0%</span>
+          </div>
+          <div className="dash-pipe-bars">
+            {pipelineRows.map((row, idx) => {
+              const h = Math.max(8, Math.round((Number(row.count || 0) / pipelineMax) * 100));
+              const hue = 198 + idx * 24;
+              return (
+                <div key={row.stageIndex} className="dash-pipe-col" title={`${row.label}: ${row.count}`}>
+                  <div className="dash-pipe-bar-wrap">
+                    <span
+                      className={`dash-pipe-bar ${hoveredStage === row.stageIndex ? "is-hovered" : ""}`}
+                      style={{ height: `${h}%`, background: `hsl(${hue} 78% 48%)` }}
+                      onMouseEnter={() => setHoveredStage(row.stageIndex)}
+                      onMouseLeave={() => setHoveredStage(null)}
+                    />
+                  </div>
+                  <small>{idx + 1}</small>
+                </div>
+              );
+            })}
+          </div>
+          <p className="dash-pipe-note">Stages 1-{pipelineRows.length} (hover bars for details)</p>
+          <div className="dash-pipe-hover">
+            {hoveredStage == null ? (
+              <span>Hover a bar to see stage details.</span>
+            ) : (
+              (() => {
+                const row = pipelineRows.find((x) => x.stageIndex === hoveredStage);
+                return row ? (
+                  <span>
+                    <strong>{row.label}</strong> • {currentStageCounts.get(row.stageIndex) || 0} batch(es) currently in this stage
+                  </span>
+                ) : (
+                  <span>Hover a bar to see stage details.</span>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      </article>
     </section>
   );
 }
@@ -1204,12 +1369,14 @@ function App() {
   const [taskStageFilter, setTaskStageFilter] = useState("all");
   const [taskDateFilter, setTaskDateFilter] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
+  const [taskListPage, setTaskListPage] = useState(1);
   const [taskError, setTaskError] = useState("");
   const [taskModalError, setTaskModalError] = useState("");
   const [obSearch, setObSearch] = useState("");
   const [obQuickRange, setObQuickRange] = useState("all");
   const [obPickDate, setObPickDate] = useState("");
   const [obArchiveScope, setObArchiveScope] = useState("active");
+  const [obListPage, setObListPage] = useState(1);
   const [obPage, setObPage] = useState(() => initialAppNav?.obPage ?? "list");
   const [selectedObSlipId, setSelectedObSlipId] = useState(() => initialAppNav?.selectedObSlipId ?? null);
   const [obExportIds, setObExportIds] = useState([]);
@@ -1217,6 +1384,7 @@ function App() {
   const [eventSearch, setEventSearch] = useState("");
   const [eventFilter, setEventFilter] = useState("all");
   const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeeSort, setEmployeeSort] = useState("az");
   const [backendOffline, setBackendOffline] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authFormMode, setAuthFormMode] = useState("login");
@@ -1544,13 +1712,17 @@ function App() {
   );
 
   const filteredEmployees = useMemo(
-    () =>
-      (employeeFilter === "all" ? employees : employees.filter((e) => e.type === employeeFilter)).filter((e) =>
-        `${e.name} ${e.position} ${e.department || ""} ${e.email || ""} ${e.contactNo || ""} ${e.address || ""}`
-          .toLowerCase()
-          .includes(employeeSearch.toLowerCase())
-      ),
-    [employees, employeeFilter, employeeSearch]
+    () => {
+      const base = (employeeFilter === "all" ? employeesSorted : employeesSorted.filter((e) => e.type === employeeFilter)).filter(
+        (e) =>
+          `${e.name} ${e.position} ${e.department || ""} ${e.email || ""} ${e.contactNo || ""} ${e.address || ""}`
+            .toLowerCase()
+            .includes(employeeSearch.toLowerCase())
+      );
+      if (employeeSort === "za") return [...base].reverse();
+      return base;
+    },
+    [employeesSorted, employeeFilter, employeeSearch, employeeSort]
   );
 
   useEffect(() => {
@@ -1583,7 +1755,7 @@ function App() {
   }, [selectedTask]);
 
   const filteredTasks = useMemo(() => {
-    return tasksData.items.filter((task) => {
+    const filtered = tasksData.items.filter((task) => {
       const textPass = `${task.title} ${task.batchDate}`.toLowerCase().includes(taskSearch.toLowerCase());
       const stagePass = taskStageFilter === "all" || String(task.currentStage) === taskStageFilter;
       const datePass = !taskDateFilter || task.batchDate === taskDateFilter;
@@ -1595,6 +1767,11 @@ function App() {
           : "in-progress";
       const statusPass = taskStatusFilter === "all" || taskStatusFilter === status;
       return textPass && stagePass && datePass && statusPass;
+    });
+    return [...filtered].sort((a, b) => {
+      const aKey = `${a.batchDate || ""}T${a.updatedAt || a.createdAt || ""}`;
+      const bKey = `${b.batchDate || ""}T${b.updatedAt || b.createdAt || ""}`;
+      return bKey.localeCompare(aKey);
     });
   }, [tasksData.items, taskSearch, taskStageFilter, taskDateFilter, taskStatusFilter, tasksData.stages.length]);
 
@@ -1612,7 +1789,7 @@ function App() {
     const weekEnd = dayjs().endOf("week").format("YYYY-MM-DD");
     const monthStart = dayjs().startOf("month").format("YYYY-MM-DD");
     const monthEnd = dayjs().endOf("month").format("YYYY-MM-DD");
-    return obSlips.filter((s) => {
+    const filtered = obSlips.filter((s) => {
       const textPass = `${s.name} ${s.purpose} ${s.position}`.toLowerCase().includes(obSearch.toLowerCase());
       if (obArchiveScope === "active" && s.archived) return false;
       if (obArchiveScope === "archived" && !s.archived) return false;
@@ -1623,9 +1800,29 @@ function App() {
       else if (obQuickRange === "month") datePass = s.date >= monthStart && s.date <= monthEnd;
       return textPass && datePass;
     });
+    return [...filtered].sort((a, b) => {
+      const aKey = `${a.date || ""}T${a.timeOut || a.timeIn || ""}`;
+      const bKey = `${b.date || ""}T${b.timeOut || b.timeIn || ""}`;
+      return bKey.localeCompare(aKey);
+    });
   }, [obSlips, obSearch, obPickDate, obQuickRange, obArchiveScope]);
 
-  const filteredObSlipIds = useMemo(() => filteredObSlips.map((s) => s.id), [filteredObSlips]);
+  const LIST_PAGE_SIZE = 5;
+  const taskListPages = Math.max(1, Math.ceil(filteredTasks.length / LIST_PAGE_SIZE));
+  const taskPageSafe = Math.min(taskListPage, taskListPages);
+  const pagedTasks = useMemo(
+    () => filteredTasks.slice((taskPageSafe - 1) * LIST_PAGE_SIZE, taskPageSafe * LIST_PAGE_SIZE),
+    [filteredTasks, taskPageSafe]
+  );
+
+  const obListPages = Math.max(1, Math.ceil(filteredObSlips.length / LIST_PAGE_SIZE));
+  const obPageSafe = Math.min(obListPage, obListPages);
+  const pagedObSlips = useMemo(
+    () => filteredObSlips.slice((obPageSafe - 1) * LIST_PAGE_SIZE, obPageSafe * LIST_PAGE_SIZE),
+    [filteredObSlips, obPageSafe]
+  );
+
+  const filteredObSlipIds = useMemo(() => pagedObSlips.map((s) => s.id), [pagedObSlips]);
   const obAllFilteredSelected =
     filteredObSlipIds.length > 0 && filteredObSlipIds.every((id) => obExportIds.includes(id));
 
@@ -1640,7 +1837,8 @@ function App() {
 
   const filteredEvents = useMemo(() => {
     const today = dayjs().format("YYYY-MM-DD");
-    return events
+    const nowTs = Date.now();
+    const filtered = events
       .filter((ev) => {
         const textPass = `${ev.title} ${ev.description || ""}`.toLowerCase().includes(eventSearch.toLowerCase());
         if (!textPass) return false;
@@ -1649,9 +1847,35 @@ function App() {
         if (eventFilter === "today") return ev.date === today;
         if (eventFilter === "upcoming") return ev.date >= today;
         return true;
-      })
-      .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+      });
+
+    return [...filtered].sort((a, b) => {
+        const aTs = Date.parse(`${a.date}T${a.time || "23:59"}`);
+        const bTs = Date.parse(`${b.date}T${b.time || "23:59"}`);
+        const aUpcoming = Number.isFinite(aTs) && aTs >= nowTs;
+        const bUpcoming = Number.isFinite(bTs) && bTs >= nowTs;
+        if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+        if (aUpcoming && bUpcoming) return aTs - bTs;
+        if (Number.isFinite(aTs) && Number.isFinite(bTs)) return bTs - aTs;
+        return (a.date + (a.time || "")).localeCompare(b.date + (b.time || ""));
+      });
   }, [events, eventSearch, eventFilter]);
+
+  useEffect(() => {
+    setTaskListPage(1);
+  }, [taskSearch, taskStageFilter, taskDateFilter, taskStatusFilter, tasksData.items.length]);
+
+  useEffect(() => {
+    if (taskListPage > taskListPages) setTaskListPage(taskListPages);
+  }, [taskListPage, taskListPages]);
+
+  useEffect(() => {
+    setObListPage(1);
+  }, [obSearch, obPickDate, obQuickRange, obArchiveScope, obSlips.length]);
+
+  useEffect(() => {
+    if (obListPage > obListPages) setObListPage(obListPages);
+  }, [obListPage, obListPages]);
 
   const obSlipSummary = useMemo(() => {
     const today = dayjs().format("YYYY-MM-DD");
@@ -1763,7 +1987,79 @@ function App() {
     win.document.write(buildObSlipPrintHtml(slip));
     win.document.close();
     win.focus();
-    win.print();
+    const attemptPrint = () => {
+      try {
+        const imgs = Array.from(win.document.images || []);
+        const ready = imgs.every((img) => img.complete && img.naturalWidth > 0);
+        if (ready) {
+          win.print();
+          return;
+        }
+        let remaining = imgs.length;
+        if (remaining === 0) {
+          win.print();
+          return;
+        }
+        const done = () => {
+          remaining -= 1;
+          if (remaining <= 0) win.print();
+        };
+        imgs.forEach((img) => {
+          if (img.complete) done();
+          else {
+            img.addEventListener("load", done, { once: true });
+            img.addEventListener("error", done, { once: true });
+          }
+        });
+        setTimeout(() => win.print(), 1200);
+      } catch {
+        win.print();
+      }
+    };
+    win.addEventListener("load", attemptPrint, { once: true });
+  };
+
+  const printSelectedObSlips = () => {
+    const selected = obSlips.filter((s) => obExportIds.includes(s.id));
+    if (selected.length === 0) {
+      window.alert("Select at least one slip to print.");
+      return;
+    }
+    const win = window.open("", "_blank", "width=1100,height=800");
+    if (!win) return;
+    win.document.write(buildObSlipPrintHtml(selected));
+    win.document.close();
+    win.focus();
+    const attemptPrint = () => {
+      try {
+        const imgs = Array.from(win.document.images || []);
+        const ready = imgs.every((img) => img.complete && img.naturalWidth > 0);
+        if (ready) {
+          win.print();
+          return;
+        }
+        let remaining = imgs.length;
+        if (remaining === 0) {
+          win.print();
+          return;
+        }
+        const done = () => {
+          remaining -= 1;
+          if (remaining <= 0) win.print();
+        };
+        imgs.forEach((img) => {
+          if (img.complete) done();
+          else {
+            img.addEventListener("load", done, { once: true });
+            img.addEventListener("error", done, { once: true });
+          }
+        });
+        setTimeout(() => win.print(), 1200);
+      } catch {
+        win.print();
+      }
+    };
+    win.addEventListener("load", attemptPrint, { once: true });
   };
 
   const selectTab = (tab) => {
@@ -1896,6 +2192,10 @@ function App() {
             </button>
           </div>
           <div className="live-pill">v1.0</div>
+          <div className="sidebar-devs">
+            <p className="sidebar-devs-label">Developers</p>
+            <p className="sidebar-devs-names">Nicole Borabo, Andrei Asnan</p>
+          </div>
         </div>
       </aside>
 
@@ -1926,6 +2226,7 @@ function App() {
             events={events.filter((e) => !e.archived)}
             holidays={holidays}
             employees={employees}
+            taskLogs={tasksData.logs || []}
             onNavigate={selectTab}
           />
         )}
@@ -2013,7 +2314,7 @@ function App() {
                     {filteredTasks.length === 0 ? (
                       <div className="task-empty">No tasks match your current filters.</div>
                     ) : (
-                      filteredTasks.map((task) => {
+                      pagedTasks.map((task) => {
                         const progressPct = Math.round(((task.currentStage + 1) / tasksData.stages.length) * 100);
                         const status =
                           task.currentStage === tasksData.stages.length - 1
@@ -2094,6 +2395,20 @@ function App() {
                       })
                     )}
                   </div>
+                  {filteredTasks.length > LIST_PAGE_SIZE && (
+                    <div className="list-pagination" aria-label="Task list pages">
+                      {Array.from({ length: taskListPages }, (_, i) => i + 1).map((p) => (
+                        <button
+                          key={`task-page-${p}`}
+                          type="button"
+                          className={`list-page-btn ${p === taskPageSafe ? "is-active" : ""}`}
+                          onClick={() => setTaskListPage(p)}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </article>
               </div>
             )}
@@ -2303,6 +2618,9 @@ function App() {
                         <option value="archived">Archived only</option>
                         <option value="all">Active + archived</option>
                       </select>
+                      <button type="button" className="ob-slip-action" onClick={printSelectedObSlips}>
+                        {obExportIds.length > 0 ? `Print selected (${obExportIds.length})` : "Print selected"}
+                      </button>
                       <button type="button" className="ob-slip-action" onClick={() => downloadObSlipsExport()}>
                         {obExportIds.length > 0 ? `Export selected (${obExportIds.length})` : "Export Excel"}
                       </button>
@@ -2348,10 +2666,10 @@ function App() {
                         {obExportIds.length > 0 ? ` · ${obExportIds.length} selected for export` : ""}
                       </p>
                     </div>
-                    {filteredObSlips.length > 0 ? (
+                    {pagedObSlips.length > 0 ? (
                       <label className="ob-slip-select-all">
                         <input type="checkbox" checked={obAllFilteredSelected} onChange={toggleObSelectAllFiltered} />
-                        <span>Select visible</span>
+                        <span>Select visible page</span>
                       </label>
                     ) : null}
                   </div>
@@ -2359,7 +2677,7 @@ function App() {
                     {filteredObSlips.length === 0 ? (
                       <div className="task-empty">No slips match your filters.</div>
                     ) : (
-                      filteredObSlips.map((s) => {
+                      pagedObSlips.map((s) => {
                         const openDetail = () => {
                           applyAndPushNav({ obPage: "detail", selectedObSlipId: s.id });
                         };
@@ -2444,6 +2762,20 @@ function App() {
                       })
                     )}
                   </div>
+                  {filteredObSlips.length > LIST_PAGE_SIZE && (
+                    <div className="list-pagination" aria-label="OB slip list pages">
+                      {Array.from({ length: obListPages }, (_, i) => i + 1).map((p) => (
+                        <button
+                          key={`ob-page-${p}`}
+                          type="button"
+                          className={`list-page-btn ${p === obPageSafe ? "is-active" : ""}`}
+                          onClick={() => setObListPage(p)}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </article>
               </div>
             )}
@@ -2640,6 +2972,10 @@ function App() {
                         <option value="full-time">Full-Time</option>
                         <option value="part-time">Part-Time</option>
                       </select>
+                      <select value={employeeSort} onChange={(e) => setEmployeeSort(e.target.value)} aria-label="Sort employees">
+                        <option value="az">Sort: A-Z</option>
+                        <option value="za">Sort: Z-A</option>
+                      </select>
                     </div>
                     <button
                       type="button"
@@ -2702,30 +3038,6 @@ function App() {
                               <div className="list-main">
                                 <strong>{emp.name}</strong>
                                 <small className="staff-list-meta-line">{emp.position}</small>
-                                {(emp.email || emp.contactNo) && (
-                                  <small className="staff-list-contact-line">
-                                    {emp.email ? <span>{emp.email}</span> : null}
-                                    {emp.email && emp.contactNo ? <span className="staff-list-dot"> · </span> : null}
-                                    {emp.contactNo ? <span>{emp.contactNo}</span> : null}
-                                  </small>
-                                )}
-                                <small className="staff-list-basic">
-                                  <span>{emp.department || "—"}</span>
-                                  <span className="staff-list-dot" aria-hidden="true">
-                                    ·
-                                  </span>
-                                  <span>{emp.type === "full-time" ? "Full-time" : "Part-time"}</span>
-                                </small>
-                                <small className="staff-list-basic-line">
-                                  <span className="staff-basic-kicker">Basic info</span>
-                                  <span>
-                                    {emp.birthday
-                                      ? `Birthday ${dayjs(emp.birthday).format("MMM D, YYYY")}`
-                                      : "Birthday not on file"}
-                                    {emp.email ? ` · ${emp.email}` : ""}
-                                    {emp.contactNo ? ` · ${emp.contactNo}` : ""}
-                                  </span>
-                                </small>
                               </div>
                             </div>
                             <div className="list-meta list-meta--crud" onClick={(e) => e.stopPropagation()}>
@@ -2781,7 +3093,7 @@ function App() {
 
             {employeePage === "detail" && selectedEmployee && (
               <article className="panel staff-detail-panel">
-                <div className="panel-head panel-head--task-detail">
+                <div className="panel-head panel-head--task-detail panel-head--staff-detail">
                   <h3>{selectedEmployee.name}</h3>
                   <div className="panel-head-actions">
                     <button
@@ -2831,6 +3143,7 @@ function App() {
                     {staffInitials(selectedEmployee.name)}
                   </div>
                   <div className="staff-detail-hero-text">
+                    <p className="staff-detail-kicker">Employee Profile</p>
                     <p className="staff-detail-role">{selectedEmployee.position}</p>
                     <p className="staff-detail-dept">{selectedEmployee.department || "No department set"}</p>
                     <span className="status-pill staff-detail-type-pill">
@@ -2839,69 +3152,89 @@ function App() {
                   </div>
                 </div>
 
-                <div className="staff-basic-info-card">
-                  <div className="staff-basic-info-head">
-                    <h4>Basic info</h4>
-                    <span className="staff-basic-info-kicker">Profile</span>
+                <div className="staff-detail-highlights">
+                  <div className="staff-highlight-card">
+                    <small>Department</small>
+                    <strong>{selectedEmployee.department || "COMELEC"}</strong>
                   </div>
-                  <div className="staff-basic-info-grid">
-                    <div>
-                      <small>Full name</small>
-                      <strong>{selectedEmployee.name}</strong>
+                  <div className="staff-highlight-card">
+                    <small>Birthday</small>
+                    <strong>
+                      {selectedEmployee.birthday ? dayjs(selectedEmployee.birthday).format("MMM D, YYYY") : "Not set"}
+                    </strong>
+                  </div>
+                  <div className="staff-highlight-card">
+                    <small>Contact no.</small>
+                    <strong>{selectedEmployee.contactNo || "Not set"}</strong>
+                  </div>
+                </div>
+
+                <div className="staff-detail-grid">
+                  <div className="staff-basic-info-card">
+                    <div className="staff-basic-info-head">
+                      <h4>Work details</h4>
+                      <span className="staff-basic-info-kicker">Role</span>
                     </div>
-                    <div>
-                      <small>Position</small>
-                      <strong>{selectedEmployee.position}</strong>
+                    <div className="staff-basic-info-grid">
+                      <div>
+                        <small>Full name</small>
+                        <strong>{selectedEmployee.name}</strong>
+                      </div>
+                      <div>
+                        <small>Position</small>
+                        <strong>{selectedEmployee.position}</strong>
+                      </div>
+                      <div>
+                        <small>Department</small>
+                        <strong>{selectedEmployee.department || "—"}</strong>
+                      </div>
+                      <div>
+                        <small>Employment type</small>
+                        <strong>{selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}</strong>
+                      </div>
                     </div>
-                    <div>
-                      <small>Department</small>
-                      <strong>{selectedEmployee.department || "—"}</strong>
+                  </div>
+
+                  <div className="staff-basic-info-card staff-basic-info-card--contact">
+                    <div className="staff-basic-info-head">
+                      <h4>Contact details</h4>
+                      <span className="staff-basic-info-kicker">Reach out</span>
                     </div>
-                    <div>
-                      <small>Employment type</small>
-                      <strong>{selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}</strong>
-                    </div>
-                    <div>
-                      <small>Birthday</small>
-                      <strong>
-                        {selectedEmployee.birthday
-                          ? dayjs(selectedEmployee.birthday).format("MMM D, YYYY")
-                          : "—"}
-                      </strong>
-                    </div>
-                    <div>
-                      <small>Gmail / email</small>
-                      <strong>
-                        {selectedEmployee.email ? (
-                          <a className="staff-contact-link" href={`mailto:${selectedEmployee.email}`}>
-                            {selectedEmployee.email}
-                          </a>
-                        ) : (
-                          "—"
-                        )}
-                      </strong>
-                    </div>
-                    <div>
-                      <small>Contact no.</small>
-                      <strong>
-                        {selectedEmployee.contactNo ? (
-                          <a className="staff-contact-link" href={`tel:${String(selectedEmployee.contactNo).replace(/\s/g, "")}`}>
-                            {selectedEmployee.contactNo}
-                          </a>
-                        ) : (
-                          "—"
-                        )}
-                      </strong>
-                    </div>
-                    <div className="staff-basic-info-span">
-                      <small>Address</small>
-                      <strong className="staff-address-block">
-                        {selectedEmployee.address?.trim() ? selectedEmployee.address : "—"}
-                      </strong>
-                    </div>
-                    <div className="staff-basic-info-span">
-                      <small>Staff record ID</small>
-                      <strong className="staff-id-mono">{selectedEmployee.id}</strong>
+                    <div className="staff-basic-info-grid">
+                      <div className="staff-basic-info-span">
+                        <small>Gmail / email</small>
+                        <strong>
+                          {selectedEmployee.email ? (
+                            <a className="staff-contact-link" href={`mailto:${selectedEmployee.email}`}>
+                              {selectedEmployee.email}
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                        </strong>
+                      </div>
+                      <div>
+                        <small>Contact no.</small>
+                        <strong>
+                          {selectedEmployee.contactNo ? (
+                            <a className="staff-contact-link" href={`tel:${String(selectedEmployee.contactNo).replace(/\s/g, "")}`}>
+                              {selectedEmployee.contactNo}
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                        </strong>
+                      </div>
+                      <div className="staff-basic-info-span">
+                        <small>Address</small>
+                        <strong className="staff-address-block">
+                          {selectedEmployee.address?.trim() ? selectedEmployee.address : "—"}
+                        </strong>
+                      </div>
+                      <div className="staff-basic-info-span">
+                        <small>Staff record ID</small>
+                        <strong className="staff-id-mono">{selectedEmployee.id}</strong>
+                      </div>
                     </div>
                   </div>
                 </div>

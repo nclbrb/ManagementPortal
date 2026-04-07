@@ -305,7 +305,10 @@ function getDashboardData() {
   const weekStart = now.subtract(6, "day").format("YYYY-MM-DD");
   const obActive = (s) => !s.archived;
   const weekOBSlips = db.data.obSlips.filter((s) => obActive(s) && s.date >= weekStart && s.date <= today).length;
-  const weekEvents = db.data.events.filter((e) => activeEvent(e) && e.date >= weekStart && e.date <= today).length;
+  const holidayRows = getPhilippinesHolidayRollup();
+  const weekHolidayCount = holidayRows.filter((h) => h.date >= weekStart && h.date <= today).length;
+  const weekEventCount = db.data.events.filter((e) => activeEvent(e) && e.date >= weekStart && e.date <= today).length;
+  const weekEvents = weekEventCount + weekHolidayCount;
 
   const upcomingEvents = db.data.events
     .filter((e) => activeEvent(e) && e.date >= today)
@@ -355,7 +358,9 @@ function getDashboardData() {
       text: `${completionRate}% of batches reached Final Filing. Keep the pipeline moving.`,
     });
   }
+  const todayHolidayCount = holidayRows.filter((h) => h.date === today).length;
   const todayActiveEvents = db.data.events.filter((e) => activeEvent(e) && e.date === today).length;
+  const todayEventsCombined = todayActiveEvents + todayHolidayCount;
   if (todayActiveEvents > 0) {
     insights.push({
       type: "info",
@@ -366,10 +371,12 @@ function getDashboardData() {
   return {
     employees: db.data.employees.length,
     employeesByType,
-    todayEvents: todayActiveEvents,
+    todayEvents: todayEventsCombined,
     todayOBSlips: db.data.obSlips.filter((s) => obActive(s) && s.date === today).length,
     weekOBSlips,
     weekEvents,
+    todayHolidays: todayHolidayCount,
+    weekHolidays: weekHolidayCount,
     tasks: taskTotals,
     tasksByStage,
     completionRate,
