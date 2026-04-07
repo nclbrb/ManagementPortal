@@ -239,7 +239,6 @@ function saveState(data) {
   const insSess = sqlDb.prepare(
     `INSERT INTO sessions (token, user_id, created_at) VALUES (@token, @userId, @createdAt)`
   );
-
   const run = sqlDb.transaction(() => {
     sqlDb.prepare("DELETE FROM sessions").run();
     sqlDb.prepare("DELETE FROM users").run();
