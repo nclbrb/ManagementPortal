@@ -76,6 +76,13 @@ function createTables() {
 
     CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
   `);
+
+  // Forward-compatible migration: add employee profile image column if missing.
+  const empColumns = sqlDb.prepare("PRAGMA table_info(employees)").all();
+  const hasProfileImage = empColumns.some((c) => c && c.name === "profile_image");
+  if (!hasProfileImage) {
+    sqlDb.exec(`ALTER TABLE employees ADD COLUMN profile_image TEXT NOT NULL DEFAULT ''`);
+  }
 }
 
 /**
@@ -141,7 +148,8 @@ function migrateFromJsonIfEmpty(jsonPath) {
 function loadState() {
   const employees = sqlDb
     .prepare(
-      `SELECT id, name, position, type, department, birthday, email, contact_no AS contactNo, address FROM employees ORDER BY rowid`
+      `SELECT id, name, position, type, department, birthday, email, contact_no AS contactNo, address,
+        profile_image AS profileImage FROM employees ORDER BY rowid`
     )
     .all();
 
@@ -213,8 +221,8 @@ function safeJsonParse(text, fallback) {
  */
 function saveState(data) {
   const insEmp = sqlDb.prepare(
-    `INSERT INTO employees (id, name, position, type, department, birthday, email, contact_no, address)
-     VALUES (@id, @name, @position, @type, @department, @birthday, @email, @contactNo, @address)`
+    `INSERT INTO employees (id, name, position, type, department, birthday, email, contact_no, address, profile_image)
+     VALUES (@id, @name, @position, @type, @department, @birthday, @email, @contactNo, @address, @profileImage)`
   );
   const insEv = sqlDb.prepare(
     `INSERT INTO events (id, title, date, time, description, archived)
@@ -259,6 +267,7 @@ function saveState(data) {
         email: e.email ?? "",
         contactNo: e.contactNo ?? "",
         address: e.address ?? "",
+        profileImage: e.profileImage ?? "",
       });
     }
     for (const ev of data.events || []) {

@@ -360,7 +360,7 @@ function buildObSlipPrintHtml(input) {
 </body>
 </html>`;
 }
-const tabs = ["Dashboard", "Task Tracker", "OB Slip", "Calendar", "Employees"];
+const tabs = ["Dashboard", "Task Tracker", "OB Slip", "Event", "Employees"];
 
 const COMELEC_NAV_KEY = "comelec_nav_v1";
 
@@ -378,7 +378,8 @@ function readStoredNav() {
 
 function normalizeNav(o) {
   if (!o || typeof o !== "object") return null;
-  const tab = tabs.includes(o.tab) ? o.tab : "Dashboard";
+  const legacyTab = o.tab === "Calendar" ? "Event" : o.tab;
+  const tab = tabs.includes(legacyTab) ? legacyTab : "Dashboard";
   return {
     tab,
     taskPage: o.taskPage === "detail" || o.taskPage === "list" ? o.taskPage : "list",
@@ -429,6 +430,14 @@ const tabIcons = {
       <line x1="8" y1="17" x2="16" y2="17" />
     </svg>
   ),
+  Event: (
+    <svg {...iconProps}>
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <line x1="8" y1="2.5" x2="8" y2="6" />
+      <line x1="16" y1="2.5" x2="16" y2="6" />
+    </svg>
+  ),
   Calendar: (
     <svg {...iconProps}>
       <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -456,9 +465,11 @@ function DashboardSection({
   holidays = [],
   employees = [],
   taskLogs = [],
+  userDisplayName = "User",
   onNavigate,
 }) {
   const todayYmd = dayjs().format("YYYY-MM-DD");
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
   const [selectedDate, setSelectedDate] = useState(todayYmd);
   const dayScrollRef = useRef(null);
@@ -595,7 +606,7 @@ function DashboardSection({
           <div className="dash-overview-main">
             <span className="dash-kicker">Operations overview</span>
             <h2 className="dash-overview-title">
-              {greeting}, <span className="dash-overview-accent">COMELEC</span> workspace
+              {greeting}, <span className="dash-overview-accent">{userDisplayName}</span>!
             </h2>
             <p className="dash-overview-desc">
               Election operations at a glance: batches, OB slips, calendar, and staff. Data updates when the API is
@@ -810,7 +821,7 @@ function DashboardSection({
                 )}
             </div>
 
-            <button type="button" className="btn-text dash-link-calendar" onClick={() => onNavigate("Calendar")}>
+            <button type="button" className="btn-text dash-link-calendar" onClick={() => onNavigate("Event")}>
               Open full calendar →
             </button>
           </article>
@@ -943,6 +954,7 @@ function CalendarSection({
   setBackendOffline,
 }) {
   const todayYmd = dayjs().format("YYYY-MM-DD");
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
   const [selectedDate, setSelectedDate] = useState(todayYmd);
   const ym = viewMonth;
@@ -1034,14 +1046,14 @@ function CalendarSection({
     <div className="task-tracker-page task-tracker-page--stacked cal-app">
       <header className="task-tracker-intro">
         <span className="task-tracker-eyebrow">Scheduling</span>
-        <h2 className="task-tracker-title">Calendar</h2>
+        <h2 className="task-tracker-title">Event</h2>
         <p className="task-tracker-lede">
-          <strong>Philippines (PH)</strong> national holidays (public and bank) come from the holiday calendar and refresh with live data.
-          Staff birthdays and your events show on the grid. Archive old events to keep the list tidy.
+          Plan dates, track upcoming activities, and manage events from one workspace. PH holidays and staff birthdays are
+          blended into your monthly calendar automatically.
         </p>
       </header>
 
-      <div className="tracker-summary tracker-summary--row cal-app-kpis">
+      <div className="tracker-summary tracker-summary--row">
         <article className="tracker-kpi">
           <small>Active events</small>
           <strong>{eventSummary.total}</strong>
@@ -1058,18 +1070,6 @@ function CalendarSection({
           <small>Archived</small>
           <strong>{eventSummary.archived}</strong>
         </article>
-      </div>
-
-      <div className="cal-app-legend" aria-label="Calendar legend">
-        <span>
-          <i className="cal-legend-dot cal-legend-dot--holiday" /> PH holiday
-        </span>
-        <span>
-          <i className="cal-legend-dot cal-legend-dot--birthday" /> Birthday
-        </span>
-        <span>
-          <i className="cal-legend-dot cal-legend-dot--event" /> Event
-        </span>
       </div>
 
       <div className="task-tracker-filters-card">
@@ -1098,144 +1098,10 @@ function CalendarSection({
         </div>
       </div>
 
-      <div className="cal-app-main">
-        <article className="panel cal-app-cal-panel">
-          <div className="dash-cal-head cal-app-cal-head">
-            <button type="button" className="dash-cal-nav" onClick={goPrevMonth} aria-label="Previous month">
-              ‹
-            </button>
-            <div className="dash-cal-title">
-              <h3>{monthLabel}</h3>
-              <button type="button" className="btn-text dash-cal-today" onClick={goToday}>
-                Today
-              </button>
-            </div>
-            <button type="button" className="dash-cal-nav" onClick={goNextMonth} aria-label="Next month">
-              ›
-            </button>
-          </div>
-          <div className="dash-cal-weekdays">
-            {dowLabels.map((d) => (
-              <span key={d}>{d}</span>
-            ))}
-          </div>
-          <div className="dash-cal-grid cal-app-cal-grid">
-            {calendarCells.map((cell, i) =>
-              cell.type === "pad" ? (
-                <div key={`pad-${i}`} className="dash-cal-cell dash-cal-cell--empty" />
-              ) : (
-                <button
-                  key={cell.dateStr}
-                  type="button"
-                  className={`dash-cal-cell cal-app-cal-cell ${cell.dateStr === todayYmd ? "dash-cal-cell--today" : ""} ${
-                    cell.dateStr === selectedDate ? "dash-cal-cell--selected" : ""
-                  }`}
-                  onClick={() => setSelectedDate(cell.dateStr)}
-                >
-                  <span className="dash-cal-daynum">{cell.day}</span>
-                  <span className="cal-app-dots" aria-hidden="true">
-                    {(holidaysByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--holiday" />}
-                    {(birthdaysByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--birthday" />}
-                    {(eventsByDate[cell.dateStr]?.length || 0) > 0 && <span className="cal-dot cal-dot--event" />}
-                  </span>
-                </button>
-              )
-            )}
-          </div>
-        </article>
-
-        <div className="cal-app-side">
-          <article className="panel cal-app-day-panel">
-            <h3 className="cal-app-day-title">{dayjs(selectedDate).format("dddd, MMM D, YYYY")}</h3>
-
-            {selectedHolidays.length > 0 && (
-              <div className="cal-app-day-block">
-                <h4 className="cal-app-day-block-title">Philippines holidays</h4>
-                <ul className="cal-app-day-list">
-                  {selectedHolidays.map((h, idx) => (
-                    <li key={`${h.date}-${h.name}-${idx}`}>
-                      <strong>{h.name}</strong>
-                      <span className="cal-app-tag cal-app-tag--holiday">{h.type === "bank" ? "PH bank" : "PH public"}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {selectedBirthdays.length > 0 && (
-              <div className="cal-app-day-block">
-                <h4 className="cal-app-day-block-title">Staff birthdays</h4>
-                <ul className="cal-app-day-list">
-                  {selectedBirthdays.map((b) => (
-                    <li key={b.id}>
-                      <strong>{b.name}</strong>
-                      <span className="cal-app-tag cal-app-tag--birthday">Birthday</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            <div className="cal-app-day-block">
-              <h4 className="cal-app-day-block-title">Events</h4>
-              {selectedEvents.length === 0 ? (
-                <p className="modal-hint">No events this day. Use Add Event or pick another date.</p>
-              ) : (
-                <ul className="cal-app-day-list cal-app-day-list--events">
-                  {selectedEvents.map((ev) => (
-                    <li key={ev.id}>
-                      <div>
-                        <strong>{ev.title}</strong>
-                        <small>{ev.time || "—"}</small>
-                        {ev.archived && <span className="cal-app-tag cal-app-tag--archived">Archived</span>}
-                      </div>
-                      <div className="cal-app-day-actions">
-                        {!ev.archived && (
-                          <button
-                            type="button"
-                            className="btn-text"
-                            onClick={async () => {
-                              try {
-                                await patchData(`/events/${ev.id}`, { archived: true });
-                                await loadAll();
-                              } catch {
-                                setBackendOffline(true);
-                              }
-                            }}
-                          >
-                            Archive
-                          </button>
-                        )}
-                        {ev.archived && (
-                          <button
-                            type="button"
-                            className="btn-text"
-                            onClick={async () => {
-                              try {
-                                await patchData(`/events/${ev.id}`, { archived: false });
-                                await loadAll();
-                              } catch {
-                                setBackendOffline(true);
-                              }
-                            }}
-                          >
-                            Unarchive
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </article>
-        </div>
-      </div>
-
-      <article className="task-tracker-list-card">
+      <article className="task-tracker-list-card cal-app-event-list-card">
         <div className="task-tracker-list-heading">
           <div>
-            <h3 className="task-tracker-list-title">Event list</h3>
+            <h3 className="task-tracker-list-title">Event timeline</h3>
             <p className="task-tracker-list-sub">
               {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"}{" "}
               {filteredEvents.length === 1 ? "matches" : "match"} your filters
@@ -1244,17 +1110,29 @@ function CalendarSection({
         </div>
         <div className="table task-list-scroll task-list-scroll--roomy">
           {filteredEvents.map((ev) => (
-            <div key={ev.id} className={`list-item cal-app-event-row ${ev.archived ? "cal-app-event-row--archived" : ""}`}>
+            <div
+              key={ev.id}
+              className={`list-item task-list-item cal-app-event-row ${ev.archived ? "cal-app-event-row--archived" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelectedEvent(ev)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedEvent(ev);
+                }
+              }}
+            >
               <div className="list-main">
                 <strong>{ev.title}</strong>
                 <small>{`${ev.date} · ${ev.time || "—"}`}</small>
-                <small>{ev.description || "No description"}</small>
               </div>
               <div className="list-meta list-meta--crud">
                 <button
                   type="button"
                   className="btn-crud"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setEditingEventId(ev.id);
                     setNewEvent({
                       title: ev.title,
@@ -1271,7 +1149,8 @@ function CalendarSection({
                   <button
                     type="button"
                     className="btn-crud"
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       try {
                         await patchData(`/events/${ev.id}`, { archived: true });
                         await loadAll();
@@ -1286,7 +1165,8 @@ function CalendarSection({
                   <button
                     type="button"
                     className="btn-crud"
-                    onClick={async () => {
+                    onClick={async (e) => {
+                      e.stopPropagation();
                       try {
                         await patchData(`/events/${ev.id}`, { archived: false });
                         await loadAll();
@@ -1301,7 +1181,8 @@ function CalendarSection({
                 <button
                   type="button"
                   className="btn-crud btn-crud--danger"
-                  onClick={async () => {
+                  onClick={async (e) => {
+                    e.stopPropagation();
                     if (!window.confirm("Delete this event permanently?")) return;
                     try {
                       await deleteData(`/events/${ev.id}`);
@@ -1319,6 +1200,40 @@ function CalendarSection({
           ))}
         </div>
       </article>
+
+      {selectedEvent && (
+        <div className="event-info-layer" onClick={() => setSelectedEvent(null)}>
+          <div className="event-info-card" onClick={(e) => e.stopPropagation()}>
+            <div className="event-info-head">
+              <h3>Event details</h3>
+              <span className="status-pill">{selectedEvent.archived ? "Archived" : "Scheduled"}</span>
+            </div>
+            <div className="event-info-grid">
+              <div className="event-info-row event-info-row--title">
+                <small>Title</small>
+                <strong>{selectedEvent.title}</strong>
+              </div>
+              <div className="event-info-row">
+                <small>Date</small>
+                <strong>{selectedEvent.date}</strong>
+              </div>
+              <div className="event-info-row">
+                <small>Time</small>
+                <strong>{selectedEvent.time || "—"}</strong>
+              </div>
+              <div className="event-info-row event-info-row--full">
+                <small>Description</small>
+                <p>{selectedEvent.description?.trim() || "No description provided."}</p>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setSelectedEvent(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1350,6 +1265,7 @@ function App() {
     email: "",
     contactNo: "",
     address: "",
+    profileImage: "",
   });
   const [holidays, setHolidays] = useState([]);
   const [calendarShowArchived, setCalendarShowArchived] = useState(false);
@@ -1693,6 +1609,24 @@ function App() {
     setEditingEventId(null);
     setEditingEmployeeId(null);
     setTaskModalError("");
+  };
+
+  const handleEmployeePhotoChange = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      window.alert("Please choose a valid image file.");
+      return;
+    }
+    if (file.size > 1_600_000) {
+      window.alert("Image is too large. Please use an image below 1.6 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === "string" ? reader.result : "";
+      setNewEmployee((prev) => ({ ...prev, profileImage: value }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const submitTaskAdvance = () => {
@@ -2105,6 +2039,17 @@ function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await fetch(apiUrl("/auth/logout"), { method: "POST", headers: { ...getAuthHeaders() } });
+    } catch {
+      /* ignore */
+    }
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setAuthUser(false);
+    setNavOpen(false);
+  };
+
   if (authUser === null) {
     return (
       <div className="auth-gate auth-gate--loading">
@@ -2156,8 +2101,15 @@ function App() {
 
       <aside className="sidebar" id="app-sidebar">
         <div className="brand">
-          <h1>COMELEC</h1>
-          <p>Commission on Elections Management Portal</p>
+          <div className="brand-top">
+            <span className="brand-mark" aria-hidden="true">
+              <img src={comelecLogo} alt="" />
+            </span>
+            <div>
+              <h1>COMELEC Portal</h1>
+              <p>Management Workspace</p>
+            </div>
+          </div>
           <button type="button" className="sidebar-close" aria-label="Close menu" onClick={() => setNavOpen(false)}>
             ×
           </button>
@@ -2172,29 +2124,18 @@ function App() {
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-user">
-            <p className="sidebar-user-label">Signed in</p>
             <p className="sidebar-user-name">{authUser.name || authUser.email}</p>
-            <button
-              type="button"
-              className="sidebar-logout"
-              onClick={async () => {
-                try {
-                  await fetch(apiUrl("/auth/logout"), { method: "POST", headers: { ...getAuthHeaders() } });
-                } catch {
-                  /* ignore */
-                }
-                localStorage.removeItem(AUTH_STORAGE_KEY);
-                setAuthUser(false);
-                setNavOpen(false);
-              }}
-            >
+            <button type="button" className="sidebar-logout" onClick={handleLogout}>
               Log out
             </button>
           </div>
           <div className="live-pill">v1.0</div>
           <div className="sidebar-devs">
             <p className="sidebar-devs-label">Developers</p>
-            <p className="sidebar-devs-names">Nicole Borabo, Andrei Asnan</p>
+            <p className="sidebar-devs-names">
+              <span>Nicole Borabo</span>
+              <span>Andrei Asnan</span>
+            </p>
           </div>
         </div>
       </aside>
@@ -2227,6 +2168,7 @@ function App() {
             holidays={holidays}
             employees={employees}
             taskLogs={tasksData.logs || []}
+            userDisplayName={String(authUser?.name || authUser?.email || "User").trim() || "User"}
             onNavigate={selectTab}
           />
         )}
@@ -2264,7 +2206,7 @@ function App() {
 
                 <div className="task-tracker-filters-card">
                   <div className="task-tracker-filters-label">Filter &amp; search</div>
-                  <div className="task-tracker-toolbar">
+                  <div className="task-tracker-toolbar cal-app-toolbar">
                     <div className="inline-form task-tracker-filters">
                       <input placeholder="Search by title or date…" value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} />
                       <input type="date" value={taskDateFilter} onChange={(e) => setTaskDateFilter(e.target.value)} />
@@ -2902,7 +2844,7 @@ function App() {
           </section>
         )}
 
-        {activeTab === "Calendar" && (
+        {activeTab === "Event" && (
           <section className="tracker-layout single">
             <CalendarSection
               holidays={holidays}
@@ -2991,6 +2933,7 @@ function App() {
                           email: "",
                           contactNo: "",
                           address: "",
+                          profileImage: "",
                         });
                         setModalType("employee");
                       }}
@@ -3032,9 +2975,13 @@ function App() {
                             }}
                           >
                             <div className="staff-list-main">
-                              <span className="staff-avatar" aria-hidden="true">
-                                {staffInitials(emp.name)}
-                              </span>
+                              {emp.profileImage ? (
+                                <img className="staff-avatar staff-avatar--photo" src={emp.profileImage} alt={`${emp.name} profile`} />
+                              ) : (
+                                <span className="staff-avatar" aria-hidden="true">
+                                  {staffInitials(emp.name)}
+                                </span>
+                              )}
                               <div className="list-main">
                                 <strong>{emp.name}</strong>
                                 <small className="staff-list-meta-line">{emp.position}</small>
@@ -3055,6 +3002,7 @@ function App() {
                                     email: emp.email || "",
                                     contactNo: emp.contactNo || "",
                                     address: emp.address || "",
+                                    profileImage: emp.profileImage || "",
                                   });
                                   setModalType("employee");
                                 }}
@@ -3110,6 +3058,7 @@ function App() {
                           email: selectedEmployee.email || "",
                           contactNo: selectedEmployee.contactNo || "",
                           address: selectedEmployee.address || "",
+                          profileImage: selectedEmployee.profileImage || "",
                         });
                         setModalType("employee");
                       }}
@@ -3138,22 +3087,8 @@ function App() {
                   </div>
                 </div>
 
-                <div className="staff-detail-hero">
-                  <div className="staff-avatar staff-avatar--large" aria-hidden="true">
-                    {staffInitials(selectedEmployee.name)}
-                  </div>
-                  <div className="staff-detail-hero-text">
-                    <p className="staff-detail-kicker">Employee Profile</p>
-                    <p className="staff-detail-role">{selectedEmployee.position}</p>
-                    <p className="staff-detail-dept">{selectedEmployee.department || "No department set"}</p>
-                    <span className="status-pill staff-detail-type-pill">
-                      {selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}
-                    </span>
-                  </div>
-                </div>
-
                 <div className="staff-detail-highlights">
-                  <div className="staff-highlight-card">
+                  <div className="staff-highlight-card staff-highlight-card--department">
                     <small>Department</small>
                     <strong>{selectedEmployee.department || "COMELEC"}</strong>
                   </div>
@@ -3170,70 +3105,92 @@ function App() {
                 </div>
 
                 <div className="staff-detail-grid">
-                  <div className="staff-basic-info-card">
-                    <div className="staff-basic-info-head">
-                      <h4>Work details</h4>
-                      <span className="staff-basic-info-kicker">Role</span>
+                  <aside className="staff-profile-visual-card">
+                    <h4>Profile picture</h4>
+                    <div className="staff-profile-photo">
+                      {selectedEmployee.profileImage ? (
+                        <img
+                          className="staff-profile-photo-img"
+                          src={selectedEmployee.profileImage}
+                          alt={`${selectedEmployee.name} profile`}
+                        />
+                      ) : (
+                        <span className="staff-avatar staff-avatar--xl" aria-hidden="true">
+                          {staffInitials(selectedEmployee.name)}
+                        </span>
+                      )}
                     </div>
-                    <div className="staff-basic-info-grid">
-                      <div>
-                        <small>Full name</small>
-                        <strong>{selectedEmployee.name}</strong>
-                      </div>
-                      <div>
-                        <small>Position</small>
-                        <strong>{selectedEmployee.position}</strong>
-                      </div>
-                      <div>
-                        <small>Department</small>
-                        <strong>{selectedEmployee.department || "—"}</strong>
-                      </div>
-                      <div>
-                        <small>Employment type</small>
-                        <strong>{selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}</strong>
-                      </div>
-                    </div>
-                  </div>
+                    <p className="staff-profile-caption">
+                      Upload a profile photo in Employee form. If none is uploaded, initials are shown automatically.
+                    </p>
+                  </aside>
 
-                  <div className="staff-basic-info-card staff-basic-info-card--contact">
-                    <div className="staff-basic-info-head">
-                      <h4>Contact details</h4>
-                      <span className="staff-basic-info-kicker">Reach out</span>
+                  <div className="staff-detail-info-stack">
+                    <div className="staff-basic-info-card">
+                      <div className="staff-basic-info-head">
+                        <h4>Work details</h4>
+                        <span className="staff-basic-info-kicker">Role</span>
+                      </div>
+                      <div className="staff-basic-info-grid">
+                        <div>
+                          <small>Full name</small>
+                          <strong>{selectedEmployee.name}</strong>
+                        </div>
+                        <div>
+                          <small>Position</small>
+                          <strong>{selectedEmployee.position}</strong>
+                        </div>
+                        <div>
+                          <small>Department</small>
+                          <strong>{selectedEmployee.department || "—"}</strong>
+                        </div>
+                        <div>
+                          <small>Employment type</small>
+                          <strong>{selectedEmployee.type === "full-time" ? "Full-time" : "Part-time"}</strong>
+                        </div>
+                      </div>
                     </div>
-                    <div className="staff-basic-info-grid">
-                      <div className="staff-basic-info-span">
-                        <small>Gmail / email</small>
-                        <strong>
-                          {selectedEmployee.email ? (
-                            <a className="staff-contact-link" href={`mailto:${selectedEmployee.email}`}>
-                              {selectedEmployee.email}
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </strong>
+
+                    <div className="staff-basic-info-card staff-basic-info-card--contact">
+                      <div className="staff-basic-info-head">
+                        <h4>Contact details</h4>
+                        <span className="staff-basic-info-kicker">Reach out</span>
                       </div>
-                      <div>
-                        <small>Contact no.</small>
-                        <strong>
-                          {selectedEmployee.contactNo ? (
-                            <a className="staff-contact-link" href={`tel:${String(selectedEmployee.contactNo).replace(/\s/g, "")}`}>
-                              {selectedEmployee.contactNo}
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </strong>
-                      </div>
-                      <div className="staff-basic-info-span">
-                        <small>Address</small>
-                        <strong className="staff-address-block">
-                          {selectedEmployee.address?.trim() ? selectedEmployee.address : "—"}
-                        </strong>
-                      </div>
-                      <div className="staff-basic-info-span">
-                        <small>Staff record ID</small>
-                        <strong className="staff-id-mono">{selectedEmployee.id}</strong>
+                      <div className="staff-basic-info-grid">
+                        <div className="staff-basic-info-span">
+                          <small>Gmail / email</small>
+                          <strong>
+                            {selectedEmployee.email ? (
+                              <a className="staff-contact-link" href={`mailto:${selectedEmployee.email}`}>
+                                {selectedEmployee.email}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </strong>
+                        </div>
+                        <div className="staff-basic-info-span">
+                          <small>Contact no.</small>
+                          <strong>
+                            {selectedEmployee.contactNo ? (
+                              <a className="staff-contact-link" href={`tel:${String(selectedEmployee.contactNo).replace(/\s/g, "")}`}>
+                                {selectedEmployee.contactNo}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </strong>
+                        </div>
+                        <div className="staff-basic-info-span">
+                          <small>Address</small>
+                          <strong className="staff-address-block">
+                            {selectedEmployee.address?.trim() ? selectedEmployee.address : "—"}
+                          </strong>
+                        </div>
+                        <div className="staff-basic-info-span">
+                          <small>Staff record ID</small>
+                          <strong className="staff-id-mono">{selectedEmployee.id}</strong>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -3308,6 +3265,7 @@ function App() {
                     id="task-title"
                     value={newTask.title}
                     onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                    maxLength={80}
                     required
                   />
                 </div>
@@ -3337,6 +3295,7 @@ function App() {
                       placeholder="Initial handoff, courier, or other details…"
                       value={newTask.note}
                       onChange={(e) => setNewTask({ ...newTask, note: e.target.value })}
+                      maxLength={240}
                     />
                   </div>
                 </>
@@ -3468,6 +3427,7 @@ function App() {
                     id="ob-slip-name"
                     value={newSlip.name}
                     onChange={(e) => setNewSlip({ ...newSlip, name: e.target.value })}
+                    maxLength={80}
                     required
                   />
                 </div>
@@ -3479,6 +3439,7 @@ function App() {
                     id="ob-slip-position"
                     value={newSlip.position}
                     onChange={(e) => setNewSlip({ ...newSlip, position: e.target.value })}
+                    maxLength={60}
                     required
                   />
                 </div>
@@ -3488,6 +3449,7 @@ function App() {
                     id="ob-slip-dept"
                     value={newSlip.department}
                     onChange={(e) => setNewSlip({ ...newSlip, department: e.target.value })}
+                    maxLength={60}
                   />
                 </div>
               </div>
@@ -3497,6 +3459,7 @@ function App() {
                   id="ob-slip-purpose"
                   value={newSlip.purpose}
                   onChange={(e) => setNewSlip({ ...newSlip, purpose: e.target.value })}
+                  maxLength={140}
                   required
                 />
               </div>
@@ -3559,6 +3522,7 @@ function App() {
                   id="ev-title"
                   value={newEvent.title}
                   onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
+                  maxLength={80}
                   required
                 />
               </div>
@@ -3590,6 +3554,7 @@ function App() {
                   rows={2}
                   value={newEvent.description}
                   onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
+                  maxLength={180}
                 />
               </div>
               <div className="modal-actions">
@@ -3627,6 +3592,7 @@ function App() {
                     email: "",
                     contactNo: "",
                     address: "",
+                    profileImage: "",
                   });
                   await loadAll();
                 } catch {
@@ -3641,6 +3607,7 @@ function App() {
                     id="emp-name"
                     value={newEmployee.name}
                     onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                    maxLength={80}
                     required
                   />
                 </div>
@@ -3650,6 +3617,7 @@ function App() {
                     id="emp-position"
                     value={newEmployee.position}
                     onChange={(e) => setNewEmployee({ ...newEmployee, position: e.target.value })}
+                    maxLength={60}
                     required
                   />
                 </div>
@@ -3661,6 +3629,7 @@ function App() {
                     id="emp-dept"
                     value={newEmployee.department}
                     onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                    maxLength={60}
                   />
                 </div>
                 <div className="modal-field">
@@ -3674,6 +3643,29 @@ function App() {
                     <option value="part-time">Part-Time</option>
                   </select>
                 </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="emp-photo">Profile photo (optional)</label>
+                <input
+                  id="emp-photo"
+                  type="file"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                  onChange={(e) => handleEmployeePhotoChange(e.target.files?.[0])}
+                />
+                {newEmployee.profileImage ? (
+                  <div className="employee-photo-preview-wrap">
+                    <img className="employee-photo-preview" src={newEmployee.profileImage} alt="Employee preview" />
+                    <button
+                      type="button"
+                      className="btn-crud btn-crud--danger"
+                      onClick={() => setNewEmployee((prev) => ({ ...prev, profileImage: "" }))}
+                    >
+                      Remove photo
+                    </button>
+                  </div>
+                ) : (
+                  <p className="modal-hint">Accepted: PNG, JPG, WEBP, GIF. Max size: 1.6 MB.</p>
+                )}
               </div>
               <div className="modal-field">
                 <label htmlFor="emp-bday">Birthday (optional)</label>
@@ -3694,6 +3686,7 @@ function App() {
                     placeholder="name@gmail.com"
                     value={newEmployee.email || ""}
                     onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
+                    maxLength={90}
                   />
                 </div>
                 <div className="modal-field">
@@ -3705,6 +3698,9 @@ function App() {
                     placeholder="09XX XXX XXXX"
                     value={newEmployee.contactNo || ""}
                     onChange={(e) => setNewEmployee({ ...newEmployee, contactNo: e.target.value })}
+                    maxLength={20}
+                    pattern="[0-9+()\\-\\s]{7,20}"
+                    inputMode="tel"
                   />
                 </div>
               </div>
@@ -3716,6 +3712,7 @@ function App() {
                   placeholder="Street, barangay, city"
                   value={newEmployee.address || ""}
                   onChange={(e) => setNewEmployee({ ...newEmployee, address: e.target.value })}
+                  maxLength={160}
                 />
               </div>
               <div className="modal-actions">

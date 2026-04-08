@@ -233,6 +233,7 @@ async function bootstrap() {
     if (emp.email === undefined) emp.email = "";
     if (emp.contactNo === undefined) emp.contactNo = "";
     if (emp.address === undefined) emp.address = "";
+    if (emp.profileImage === undefined) emp.profileImage = "";
   }
   for (const slip of db.data.obSlips) {
     if (slip.archived === undefined) slip.archived = false;
@@ -502,7 +503,14 @@ app.get("/api/employees", async (req, res) => {
 
 app.post("/api/employees", async (req, res) => {
   await db.read();
-  const { name, position, type, department = "COMELEC", birthday, email, contactNo, address } = req.body;
+  const { name, position, type, department = "COMELEC", birthday, email, contactNo, address, profileImage } = req.body;
+  const normalizedProfileImage = profileImage != null ? String(profileImage).trim() : "";
+  if (normalizedProfileImage && !/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(normalizedProfileImage)) {
+    return res.status(400).json({ error: "Profile image must be a valid image data URL." });
+  }
+  if (normalizedProfileImage.length > 2_200_000) {
+    return res.status(400).json({ error: "Profile image is too large. Please use a smaller file." });
+  }
   const employee = {
     id: uuid(),
     name: String(name || "").trim(),
@@ -513,6 +521,7 @@ app.post("/api/employees", async (req, res) => {
     email: email != null ? String(email).trim() : "",
     contactNo: contactNo != null ? String(contactNo).trim() : "",
     address: address != null ? String(address).trim() : "",
+    profileImage: normalizedProfileImage,
   };
   db.data.employees.push(employee);
   await db.write();
@@ -524,7 +533,7 @@ app.patch("/api/employees/:id", async (req, res) => {
   await db.read();
   const emp = db.data.employees.find((e) => e.id === req.params.id);
   if (!emp) return res.status(404).json({ error: "Employee not found." });
-  const { name, position, type, department, birthday, email, contactNo, address } = req.body;
+  const { name, position, type, department, birthday, email, contactNo, address, profileImage } = req.body;
   if (name !== undefined) emp.name = String(name).trim();
   if (position !== undefined) emp.position = String(position).trim();
   if (type !== undefined) {
@@ -544,6 +553,16 @@ app.patch("/api/employees/:id", async (req, res) => {
   if (email !== undefined) emp.email = String(email).trim();
   if (contactNo !== undefined) emp.contactNo = String(contactNo).trim();
   if (address !== undefined) emp.address = String(address).trim();
+  if (profileImage !== undefined) {
+    const normalizedProfileImage = profileImage != null ? String(profileImage).trim() : "";
+    if (normalizedProfileImage && !/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(normalizedProfileImage)) {
+      return res.status(400).json({ error: "Profile image must be a valid image data URL." });
+    }
+    if (normalizedProfileImage.length > 2_200_000) {
+      return res.status(400).json({ error: "Profile image is too large. Please use a smaller file." });
+    }
+    emp.profileImage = normalizedProfileImage;
+  }
   await db.write();
   emitRealtime();
   res.json(emp);
