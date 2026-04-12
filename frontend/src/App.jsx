@@ -3,1240 +3,14 @@ import { io } from "socket.io-client";
 import dayjs from "dayjs";
 import { SOCKET_URL, apiUrl, AUTH_STORAGE_KEY, getAuthHeaders } from "./apiConfig.js";
 import comelecLogo from "./assets/comelec.png";
-
-async function jsonFetch(url, options = {}) {
-  const r = await fetch(url, {
-    ...options,
-    headers: { ...getAuthHeaders(), ...options.headers },
-  });
-  if (r.status === 401) {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    throw new Error("UNAUTHORIZED");
-  }
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
-
-function AuthGate({ mode, setMode, email, setEmail, password, setPassword, name, setName, error, setError, busy, setBusy, onAuthed }) {
-  const submitLogin = async (e) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const r = await fetch(apiUrl("/auth/login"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setError(data.error || "Sign-in failed.");
-        return;
-      }
-      onAuthed(data.user, data.token);
-    } catch {
-      setError("Cannot reach the server. Start the backend and try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitSignup = async (e) => {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const r = await fetch(apiUrl("/auth/signup"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, name }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setError(data.error || "Sign-up failed.");
-        return;
-      }
-      onAuthed(data.user, data.token);
-    } catch {
-      setError("Cannot reach the server. Start the backend and try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="auth-gate">
-      <div className="auth-gate-shell">
-        <aside className="auth-gate-brand">
-          <div className="auth-gate-brand-logo" role="img" aria-label="COMELEC logo" />
-          <p className="auth-gate-brand-tag">COMELEC • Republic of the Philippines</p>
-          <h1>Management Portal</h1>
-          <p className="auth-gate-brand-sub">Commission on Elections</p>
-          <p className="auth-gate-brand-sub2">Staff and Operations System</p>
-          <div className="auth-gate-brand-pills">
-            <span>Tasks</span>
-            <span>OB Slips</span>
-            <span>Calendar</span>
-          </div>
-        </aside>
-
-        <section className="auth-gate-card">
-          <header className="auth-gate-head">
-            <span className="auth-gate-badge">COMELEC ACCESS</span>
-            <h2>{mode === "login" ? "Admin Login" : "Create Account"}</h2>
-            <p className="auth-gate-subtitle">
-              {mode === "login"
-                ? "Please enter your credentials to access the COMELEC management dashboard."
-                : "Set up your account credentials to start using the management portal."}
-            </p>
-          </header>
-
-          {mode === "login" ? (
-            <form className="auth-gate-form" onSubmit={submitLogin}>
-              <label>
-                Email Address
-                <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-              </label>
-              <label>
-                Security Password
-                <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-              </label>
-              {error ? <p className="form-error auth-gate-error">{error}</p> : null}
-              <button type="submit" className="auth-gate-submit" disabled={busy}>
-                {busy ? "Signing in..." : "Sign in to Console"}
-              </button>
-              <p className="auth-gate-switch">
-                No account yet?{" "}
-                <button type="button" onClick={() => { setMode("signup"); setError(""); }}>
-                  Sign up
-                </button>
-              </p>
-            </form>
-          ) : (
-            <form className="auth-gate-form" onSubmit={submitSignup}>
-              <label>
-                Display Name
-                <input type="text" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Juan Dela Cruz" />
-              </label>
-              <label>
-                Email Address
-                <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-              </label>
-              <label>
-                Security Password
-                <input type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-              </label>
-              <p className="auth-gate-hint">Password must be at least 6 characters.</p>
-              {error ? <p className="form-error auth-gate-error">{error}</p> : null}
-              <button type="submit" className="auth-gate-submit" disabled={busy}>
-                {busy ? "Creating account..." : "Create Account"}
-              </button>
-              <p className="auth-gate-switch">
-                Already have an account?{" "}
-                <button type="button" onClick={() => { setMode("login"); setError(""); }}>
-                  Log in
-                </button>
-              </p>
-            </form>
-          )}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function staffInitials(name) {
-  const parts = String(name || "")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  if (parts[0]) return parts[0].slice(0, 2).toUpperCase();
-  return "?";
-}
-
-function escapeHtml(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-/** Printable OB slip — prints selected slips, 4 per page */
-function buildObSlipPrintHtml(input) {
-  const logoSrc = escapeHtml(comelecLogo);
-  const slips = (Array.isArray(input) ? input : [input]).filter(Boolean);
-  const makeSlipMarkup = (slip) => {
-    const date = escapeHtml(slip.date);
-    const name = escapeHtml(slip.name);
-    const position = escapeHtml(slip.position);
-    const department = escapeHtml(slip.department || "COMELEC");
-    const purpose = escapeHtml(slip.purpose);
-    const timeIn = escapeHtml(slip.timeIn);
-    const timeOut = escapeHtml(slip.timeOut);
-    return `
-      <section class="ob-slip">
-        <header class="ob-head">
-          <div class="ob-seal-wrap" aria-hidden="true"><img src="${logoSrc}" alt="COMELEC" /></div>
-          <div class="ob-head-text">
-            <p class="ob-line">Republic of the Philippines</p>
-            <p class="ob-line ob-city">CITY OF CABUYAO</p>
-            <p class="ob-line">Province of Laguna</p>
-            <h1>Official Business Slip</h1>
-          </div>
-        </header>
-
-        <div class="ob-body">
-          <div class="ob-row"><span class="label">Date :</span><span class="line">${date}</span></div>
-          <div class="ob-row"><span class="label">Name :</span><span class="line">${name}</span></div>
-          <div class="ob-row"><span class="label">Position :</span><span class="line">${position}</span></div>
-          <div class="ob-row"><span class="label">Department :</span><span class="line">${department}</span></div>
-          <div class="ob-row ob-purpose"><span class="label">Purpose :</span><span class="line">${purpose}</span></div>
-          <div class="ob-row ob-time">
-            <span class="label">Time in :</span><span class="line">${timeIn}</span>
-            <span class="label label-right">Time Out :</span><span class="line">${timeOut}</span>
-          </div>
-
-          <div class="ob-return">
-            <span class="label">Will be back?</span>
-            <span class="check-wrap">YES <span class="check"></span></span>
-            <span class="check-wrap">NO <span class="check"></span></span>
-          </div>
-
-          <div class="ob-row"><span class="label">Received by :</span><span class="line">&nbsp;</span></div>
-          <div class="ob-row"><span class="label">Approved by :</span><span class="line">&nbsp;</span></div>
-          <div class="ob-row"><span class="label">Encoded by :</span><span class="line">&nbsp;</span></div>
-        </div>
-
-        <footer class="ob-foot">
-          <div class="sig-name">ATTY. RALPH JIREH A. BARTOLOME</div>
-          <div class="sig-role">Dept. Head's Signature</div>
-        </footer>
-      </section>`;
-  };
-  const pages = [];
-  for (let i = 0; i < slips.length; i += 4) pages.push(slips.slice(i, i + 4));
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>OB Slip - ${name}</title>
-  <style>
-    * { box-sizing: border-box; }
-    @page { size: Letter portrait; margin: 8mm; }
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    }
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      color: #111;
-      background: #fff;
-      line-height: 1.25;
-    }
-    .print-page {
-      width: 100%;
-      min-height: calc(100vh - 1px);
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr;
-      gap: 7mm;
-      page-break-after: always;
-      break-after: page;
-    }
-    .print-page:last-child { page-break-after: auto; break-after: auto; }
-    .ob-slip {
-      border: 1.4px solid #000;
-      padding: 7mm 6mm 5mm;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      min-height: 0;
-    }
-    .ob-head {
-      display: grid;
-      grid-template-columns: 20mm 1fr;
-      gap: 3mm;
-      align-items: start;
-      margin-bottom: 3mm;
-    }
-    .ob-seal-wrap {
-      width: 18mm;
-      height: 18mm;
-      display: grid;
-      place-items: center;
-    }
-    .ob-seal-wrap img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-    }
-    .ob-head-text { text-align: center; }
-    .ob-line { margin: 0; font-size: 10px; font-weight: 700; }
-    .ob-city { font-size: 12px; letter-spacing: 0.03em; }
-    .ob-head h1 {
-      margin: 3mm 0 0;
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .ob-body { display: grid; gap: 2.2mm; margin-top: 1mm; }
-    .ob-row {
-      display: grid;
-      grid-template-columns: 22mm 1fr;
-      align-items: end;
-      gap: 2mm;
-      font-size: 10px;
-    }
-    .ob-row .label { font-weight: 700; }
-    .line {
-      border-bottom: 1px solid #000;
-      min-height: 3.6mm;
-      padding: 0 1mm 0.2mm;
-      font-size: 10px;
-      overflow: hidden;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-    }
-    .ob-purpose .line {
-      white-space: normal;
-      min-height: 8mm;
-      line-height: 1.2;
-      display: flex;
-      align-items: flex-end;
-      padding-top: 0;
-      padding-bottom: 0.6mm;
-    }
-    .ob-time {
-      grid-template-columns: 16mm 1fr 20mm 1fr;
-      gap: 2mm;
-    }
-    .label-right { text-align: right; }
-    .ob-return {
-      display: flex;
-      align-items: center;
-      gap: 4mm;
-      font-size: 10px;
-      margin-top: 0.6mm;
-    }
-    .check-wrap { display: inline-flex; align-items: center; gap: 1.5mm; font-weight: 700; }
-    .check {
-      display: inline-block;
-      width: 6mm;
-      height: 6mm;
-      border: 1px solid #000;
-    }
-    .ob-foot {
-      margin-top: 4.5mm;
-      text-align: center;
-      border-top: 1px solid transparent;
-    }
-    .sig-name {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.01em;
-      border-bottom: 1px solid #000;
-      padding-bottom: 1.2mm;
-      margin-top: 5.5mm;
-    }
-    .sig-role {
-      margin-top: 1.2mm;
-      font-size: 10px;
-      font-weight: 700;
-    }
-  </style>
-</head>
-<body>
-  ${pages
-    .map(
-      (chunk) => `
-  <div class="print-page">
-    ${chunk.map((s) => makeSlipMarkup(s)).join("\n")}
-  </div>`
-    )
-    .join("\n")}
-</body>
-</html>`;
-}
-const tabs = ["Dashboard", "Task Tracker", "OB Slip", "Event", "Employees"];
-
-const COMELEC_NAV_KEY = "comelec_nav_v1";
-
-function readStoredNav() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(COMELEC_NAV_KEY);
-    if (!raw) return null;
-    const o = JSON.parse(raw);
-    return o && typeof o === "object" ? o : null;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeNav(o) {
-  if (!o || typeof o !== "object") return null;
-  const legacyTab = o.tab === "Calendar" ? "Event" : o.tab;
-  const tab = tabs.includes(legacyTab) ? legacyTab : "Dashboard";
-  return {
-    tab,
-    taskPage: o.taskPage === "detail" || o.taskPage === "list" ? o.taskPage : "list",
-    selectedTaskId: typeof o.selectedTaskId === "string" ? o.selectedTaskId : null,
-    obPage: o.obPage === "detail" || o.obPage === "list" ? o.obPage : "list",
-    selectedObSlipId: typeof o.selectedObSlipId === "string" ? o.selectedObSlipId : null,
-    employeePage: o.employeePage === "detail" || o.employeePage === "list" ? o.employeePage : "list",
-    selectedEmployeeId: typeof o.selectedEmployeeId === "string" ? o.selectedEmployeeId : null,
-  };
-}
-
-const initialAppNav = typeof window !== "undefined" ? normalizeNav(readStoredNav()) : null;
-
-const iconProps = {
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: "2",
-  strokeLinecap: "round",
-  strokeLinejoin: "round",
-  width: "16",
-  height: "16",
-};
-const tabIcons = {
-  Dashboard: (
-    <svg {...iconProps}>
-      <rect x="3" y="3" width="8" height="8" />
-      <rect x="13" y="3" width="8" height="5" />
-      <rect x="13" y="10" width="8" height="11" />
-      <rect x="3" y="13" width="8" height="8" />
-    </svg>
-  ),
-  "Task Tracker": (
-    <svg {...iconProps}>
-      <line x1="8" y1="6" x2="21" y2="6" />
-      <line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <circle cx="4" cy="6" r="1.5" />
-      <circle cx="4" cy="12" r="1.5" />
-      <circle cx="4" cy="18" r="1.5" />
-    </svg>
-  ),
-  "OB Slip": (
-    <svg {...iconProps}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="8" y1="13" x2="16" y2="13" />
-      <line x1="8" y1="17" x2="16" y2="17" />
-    </svg>
-  ),
-  Event: (
-    <svg {...iconProps}>
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-      <line x1="8" y1="2.5" x2="8" y2="6" />
-      <line x1="16" y1="2.5" x2="16" y2="6" />
-    </svg>
-  ),
-  Calendar: (
-    <svg {...iconProps}>
-      <rect x="3" y="4" width="18" height="18" rx="2" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-      <line x1="8" y1="2.5" x2="8" y2="6" />
-      <line x1="16" y1="2.5" x2="16" y2="6" />
-    </svg>
-  ),
-  Employees: (
-    <svg {...iconProps}>
-      <circle cx="9" cy="8" r="3" />
-      <path d="M3 19c0-3 2.5-5 6-5s6 2 6 5" />
-      <circle cx="18" cy="9" r="2.5" />
-      <path d="M14.5 19c.2-2 1.8-3.5 4.2-3.9" />
-    </svg>
-  ),
-};
-
-function DashboardSection({
-  dashboard,
-  dashboardSearch,
-  setDashboardSearch,
-  dashboardRecent,
-  events,
-  holidays = [],
-  employees = [],
-  taskLogs = [],
-  userDisplayName = "User",
-  onNavigate,
-}) {
-  const todayYmd = dayjs().format("YYYY-MM-DD");
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
-  const [selectedDate, setSelectedDate] = useState(todayYmd);
-  const dayScrollRef = useRef(null);
-  const recentScrollRef = useRef(null);
-
-  const ym = viewMonth;
-
-  const { calendarCells, monthLabel } = useMemo(() => {
-    const first = dayjs(`${ym}-01`);
-    const startPad = first.day();
-    const dim = first.daysInMonth();
-    const cells = [];
-    for (let i = 0; i < startPad; i++) cells.push({ type: "pad" });
-    for (let d = 1; d <= dim; d++) {
-      const dateStr = first.date(d).format("YYYY-MM-DD");
-      cells.push({ type: "day", day: d, dateStr });
-    }
-    while (cells.length % 7 !== 0) cells.push({ type: "pad" });
-    return { calendarCells: cells, monthLabel: first.format("MMMM YYYY") };
-  }, [ym]);
-
-  const eventsByDate = useMemo(() => {
-    const m = {};
-    for (const ev of events) {
-      if (!ev?.date) continue;
-      if (!ev.date.startsWith(ym)) continue;
-      (m[ev.date] ||= []).push(ev);
-    }
-    return m;
-  }, [events, ym]);
-
-  const holidaysByDate = useMemo(() => {
-    const m = {};
-    for (const h of holidays) {
-      if (!h?.date?.startsWith(ym)) continue;
-      (m[h.date] ||= []).push(h);
-    }
-    return m;
-  }, [holidays, ym]);
-
-  const birthdaysByDate = useMemo(() => {
-    const m = {};
-    const year = dayjs(`${ym}-01`).year();
-    for (const emp of employees) {
-      if (!emp.birthday || !/^\d{4}-\d{2}-\d{2}$/.test(emp.birthday)) continue;
-      const bd = dayjs(emp.birthday);
-      if (!bd.isValid()) continue;
-      const occ = dayjs(`${year}-${bd.format("MM-DD")}`);
-      if (!occ.isValid()) continue;
-      const key = occ.format("YYYY-MM-DD");
-      if (!key.startsWith(ym)) continue;
-      (m[key] ||= []).push({ id: emp.id, name: emp.name });
-    }
-    return m;
-  }, [employees, ym]);
-
-  const selectedDayEvents = eventsByDate[selectedDate] || [];
-  const selectedDayHolidays = holidaysByDate[selectedDate] || [];
-  const selectedDayBirthdays = birthdaysByDate[selectedDate] || [];
-  const upcomingFallback = (dashboard.upcomingEvents || []).filter((e) => e.date >= todayYmd).slice(0, 2);
-
-  const goPrevMonth = () => {
-    const nm = dayjs(`${ym}-01`).subtract(1, "month").format("YYYY-MM");
-    setViewMonth(nm);
-    setSelectedDate(`${nm}-01`);
-  };
-
-  const goNextMonth = () => {
-    const nm = dayjs(`${ym}-01`).add(1, "month").format("YYYY-MM");
-    setViewMonth(nm);
-    setSelectedDate(`${nm}-01`);
-  };
-
-  const goToday = () => {
-    const t = dayjs().format("YYYY-MM");
-    setViewMonth(t);
-    setSelectedDate(todayYmd);
-  };
-
-  const dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-  const now = dayjs();
-  const greeting =
-    now.hour() < 12 ? "Good morning" : now.hour() < 17 ? "Good afternoon" : "Good evening";
-  const [pipelineRange, setPipelineRange] = useState("monthly");
-  const [hoveredStage, setHoveredStage] = useState(null);
-  const pipelineBaseRows = dashboard.tasksByStage || [];
-  const pipelineRows = useMemo(() => {
-    if (!Array.isArray(taskLogs) || taskLogs.length === 0) return pipelineBaseRows;
-    const nowTs = Date.now();
-    const msByRange = {
-      weekly: 7 * 24 * 60 * 60 * 1000,
-      monthly: 30 * 24 * 60 * 60 * 1000,
-      yearly: 365 * 24 * 60 * 60 * 1000,
-    };
-    const cutoff = nowTs - (msByRange[pipelineRange] || msByRange.monthly);
-    const counts = new Map(pipelineBaseRows.map((r) => [r.stageIndex, 0]));
-    for (const log of taskLogs) {
-      const ts = Date.parse(log?.at || "");
-      if (!Number.isFinite(ts) || ts < cutoff) continue;
-      let s = Number(log?.details?.stage);
-      if (!Number.isInteger(s)) s = Number(log?.details?.stageIndex);
-      if (!Number.isInteger(s)) continue;
-      if (!counts.has(s)) continue;
-      counts.set(s, (counts.get(s) || 0) + 1);
-    }
-    const total = Array.from(counts.values()).reduce((a, b) => a + b, 0) || 1;
-    return pipelineBaseRows.map((r) => {
-      const c = counts.get(r.stageIndex) || 0;
-      return { ...r, count: c, pct: Math.round((c / total) * 1000) / 10 };
-    });
-  }, [pipelineBaseRows, taskLogs, pipelineRange]);
-  const currentStageCounts = useMemo(
-    () => new Map((dashboard.tasksByStage || []).map((r) => [r.stageIndex, Number(r.count || 0)])),
-    [dashboard.tasksByStage]
-  );
-  const pipelineMax = Math.max(1, ...pipelineRows.map((r) => Number(r.count || 0)));
-  const busiestStage = pipelineRows.reduce((best, row) => (row.count > (best?.count || -1) ? row : best), null);
-  const currentCompleted = (dashboard.tasksByStage || []).slice(-1)[0]?.count || 0;
-
-  useEffect(() => {
-    if (dayScrollRef.current) dayScrollRef.current.scrollTop = 0;
-  }, [selectedDate]);
-
-  useEffect(() => {
-    if (recentScrollRef.current) recentScrollRef.current.scrollTop = 0;
-  }, [dashboardSearch, dashboardRecent.length]);
-
-  return (
-    <section className="dash-simple">
-      <div className="dash-overview">
-        <div className="dash-overview-bg" aria-hidden="true" />
-        <div className="dash-overview-inner">
-          <div className="dash-overview-main">
-            <span className="dash-kicker">Operations overview</span>
-            <h2 className="dash-overview-title">
-              {greeting}, <span className="dash-overview-accent">{userDisplayName}</span>!
-            </h2>
-            <p className="dash-overview-desc">
-              Election operations at a glance: batches, OB slips, calendar, and staff. Data updates when the API is
-              connected.
-            </p>
-            <div className="dash-overview-meta">
-              <span className="dash-pulse" title="Workspace ready when backend is running">
-                <span className="dash-pulse-dot" /> Live workspace
-              </span>
-              <span className="dash-meta-date">{now.format("dddd, MMMM D, YYYY")}</span>
-            </div>
-          </div>
-          <div className="dash-overview-side">
-            <div className="dash-overview-statbox">
-              <span className="dash-overview-stat-label">Pipeline health</span>
-              <strong className="dash-overview-stat-value">{dashboard.avgPipelinePct ?? 0}%</strong>
-              <span className="dash-overview-stat-hint">Avg. progress across batches</span>
-            </div>
-            <div className="dash-overview-ring-wrap">
-              <svg className="dash-overview-ring" viewBox="0 0 36 36" aria-hidden="true" style={{ transform: "rotate(-90deg)" }}>
-                <path
-                  className="dash-overview-ring-bg"
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-                <path
-                  className="dash-overview-ring-fg"
-                  strokeDasharray={`${Math.min(dashboard.completionRate ?? 0, 100)}, 100`}
-                  d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                />
-              </svg>
-              <div className="dash-overview-ring-label">
-                <span>Final filing</span>
-                <strong>{dashboard.completionRate ?? 0}%</strong>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {dashboard.insights?.length > 0 && (
-        <div className="dash-insights-row" role="status">
-          {dashboard.insights.map((ins, i) => (
-            <div key={i} className={`dash-insight-chip dash-insight-chip--${ins.type}`}>
-              <span className="dash-insight-chip-icon" aria-hidden="true">
-                {ins.type === "warning" ? "!" : ins.type === "positive" ? "✓" : ins.type === "info" ? "i" : "•"}
-              </span>
-              <p>{ins.text}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="dash-stats-row">
-        <div className="dash-stat-card">
-          <span className="dash-stat-label">Employees</span>
-          <strong>{dashboard.employees}</strong>
-          <span className="dash-stat-hint">
-            {dashboard.employeesByType?.fullTime ?? 0} full-time · {dashboard.employeesByType?.partTime ?? 0} part-time
-          </span>
-        </div>
-        <div className="dash-stat-card">
-          <span className="dash-stat-label">Task batches</span>
-          <strong>{dashboard.tasks?.total ?? 0}</strong>
-          <span className="dash-stat-hint">
-            {dashboard.tasks?.completed ?? 0} filed · {dashboard.tasks?.inProgress ?? 0} in progress
-          </span>
-        </div>
-        <div className="dash-stat-card">
-          <span className="dash-stat-label">OB slips (today)</span>
-          <strong>{dashboard.todayOBSlips}</strong>
-          <span className="dash-stat-hint">{dashboard.weekOBSlips ?? 0} in the last 7 days</span>
-        </div>
-        <div className="dash-stat-card">
-          <span className="dash-stat-label">Events + Holidays (today)</span>
-          <strong>{dashboard.todayEvents}</strong>
-          <span className="dash-stat-hint">{dashboard.weekEvents ?? 0} this week total</span>
-        </div>
-      </div>
-
-      <div className="dash-main-grid">
-        <article className="panel dash-cal-panel">
-          <div className="dash-cal-head">
-            <button type="button" className="dash-cal-nav" onClick={goPrevMonth} aria-label="Previous month">
-              ‹
-            </button>
-            <div className="dash-cal-title">
-              <h3>{monthLabel}</h3>
-              <button type="button" className="btn-text dash-cal-today" onClick={goToday}>
-                Today
-              </button>
-            </div>
-            <button type="button" className="dash-cal-nav" onClick={goNextMonth} aria-label="Next month">
-              ›
-            </button>
-          </div>
-          <div className="dash-cal-weekdays">
-            {dowLabels.map((d) => (
-              <span key={d}>{d}</span>
-            ))}
-          </div>
-          <p className="dash-cal-legend-note">
-            Dots: <span className="dash-cal-legend-i dash-cal-legend-i--holiday" /> PH holiday ·{" "}
-            <span className="dash-cal-legend-i dash-cal-legend-i--birthday" /> birthday ·{" "}
-            <span className="dash-cal-legend-i dash-cal-legend-i--event" /> event
-          </p>
-          <div className="dash-cal-grid">
-            {calendarCells.map((cell, i) =>
-              cell.type === "pad" ? (
-                <div key={`pad-${i}`} className="dash-cal-cell dash-cal-cell--empty" />
-              ) : (
-                <button
-                  key={cell.dateStr}
-                  type="button"
-                  className={`dash-cal-cell ${cell.dateStr === todayYmd ? "dash-cal-cell--today" : ""} ${
-                    cell.dateStr === selectedDate ? "dash-cal-cell--selected" : ""
-                  }`}
-                  onClick={() => setSelectedDate(cell.dateStr)}
-                >
-                  <span className="dash-cal-daynum">{cell.day}</span>
-                  {(holidaysByDate[cell.dateStr]?.length ||
-                    birthdaysByDate[cell.dateStr]?.length ||
-                    eventsByDate[cell.dateStr]?.length) > 0 && (
-                    <span className="cal-app-dots" aria-hidden="true">
-                      {(holidaysByDate[cell.dateStr]?.length || 0) > 0 && (
-                        <span className="cal-dot cal-dot--holiday" />
-                      )}
-                      {(birthdaysByDate[cell.dateStr]?.length || 0) > 0 && (
-                        <span className="cal-dot cal-dot--birthday" />
-                      )}
-                      {(eventsByDate[cell.dateStr]?.length || 0) > 0 && (
-                        <span className="cal-dot cal-dot--event" />
-                      )}
-                    </span>
-                  )}
-                </button>
-              )
-            )}
-          </div>
-        </article>
-
-        <div className="dash-data-col">
-          <article className="panel dash-panel-day">
-            <h3 className="dash-panel-day-title">{dayjs(selectedDate).format("MMM D, YYYY")}</h3>
-            <div className="dash-day-scroll" ref={dayScrollRef}>
-              {selectedDayHolidays.length > 0 && (
-                <div className="dash-day-section">
-                  <h4 className="dash-day-section-title">Philippines holidays</h4>
-                  <ul className="dash-day-events dash-day-events--tight">
-                    {selectedDayHolidays.map((h, idx) => (
-                      <li key={`${h.date}-${h.name}-${idx}`}>
-                        <strong>{h.name}</strong>
-                        <span>{h.type === "bank" ? "PH bank" : "PH public"}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {selectedDayBirthdays.length > 0 && (
-                <div className="dash-day-section">
-                  <h4 className="dash-day-section-title">Staff birthdays</h4>
-                  <ul className="dash-day-events dash-day-events--tight">
-                    {selectedDayBirthdays.map((b) => (
-                      <li key={b.id}>
-                        <strong>{b.name}</strong>
-                        <span>Birthday</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {selectedDayEvents.length > 0 && (
-                <div className="dash-day-section">
-                  <h4 className="dash-day-section-title">Events</h4>
-                  <ul className="dash-day-events">
-                    {selectedDayEvents.map((ev) => (
-                      <li key={ev.id}>
-                        <strong>{ev.title}</strong>
-                        <span>
-                          {ev.time}
-                          {ev.description ? ` · ${ev.description}` : ""}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {selectedDayHolidays.length === 0 &&
-                selectedDayBirthdays.length === 0 &&
-                selectedDayEvents.length === 0 && (
-                  <div className="dash-day-section">
-                    <p className="dash-muted">No Philippines holidays, staff birthdays, or events on this day.</p>
-                    {upcomingFallback.length > 0 ? (
-                      <>
-                        <h4 className="dash-day-section-title">Upcoming events</h4>
-                        <ul className="dash-day-events dash-day-events--tight">
-                          {upcomingFallback.map((ev) => (
-                            <li key={`upcoming-${ev.id}`}>
-                              <strong>{ev.title}</strong>
-                              <span>
-                                {ev.date}
-                                {ev.time ? ` · ${ev.time}` : ""}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </>
-                    ) : null}
-                  </div>
-                )}
-            </div>
-
-            <button type="button" className="btn-text dash-link-calendar" onClick={() => onNavigate("Event")}>
-              Open full calendar →
-            </button>
-          </article>
-
-          <article className="panel dash-panel-recent">
-            <div className="panel-head">
-              <h3>Recent batches</h3>
-              <input
-                className="dash-search"
-                placeholder="Search batches…"
-                value={dashboardSearch}
-                onChange={(e) => setDashboardSearch(e.target.value)}
-              />
-            </div>
-            <div className="dash-recent-scroll" ref={recentScrollRef}>
-              <div className="table dash-recent-table">
-                {dashboardRecent.length === 0 ? (
-                  <p className="dash-muted">No batches match your search.</p>
-                ) : (
-                  dashboardRecent.map((t) => (
-                    <div
-                      key={t.id}
-                      className="list-item list-item--click"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onNavigate("Task Tracker")}
-                      onKeyDown={(e) => e.key === "Enter" && onNavigate("Task Tracker")}
-                    >
-                      <div className="list-main">
-                        <strong>{t.title}</strong>
-                        <small>{`Batch date: ${t.batchDate}`}</small>
-                      </div>
-                      <div className="list-meta">
-                        <span className="status-pill">{`Stage ${t.currentStage}`}</span>
-                        <span className="list-arrow">›</span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </article>
-        </div>
-      </div>
-
-      <article className="panel dash-stage-panel">
-        <div className="panel-head">
-          <h3>Task Pipeline</h3>
-          <label className="dash-pipe-filter-wrap">
-            <span>Range</span>
-            <select value={pipelineRange} onChange={(e) => setPipelineRange(e.target.value)}>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="yearly">Yearly</option>
-            </select>
-          </label>
-        </div>
-        <div className="dash-pipe-kpis">
-          <span>Total: <strong>{dashboard.tasks?.total ?? 0}</strong></span>
-          <span>In Progress: <strong>{dashboard.tasks?.inProgress ?? 0}</strong></span>
-          <span>Completed: <strong>{currentCompleted}</strong></span>
-          <span>Busiest: <strong>{busiestStage ? `${busiestStage.label} (${busiestStage.count})` : "N/A"}</strong></span>
-        </div>
-        <div className="dash-pipe-chart">
-          <div className="dash-pipe-axis">
-            <span>100%</span>
-            <span>50%</span>
-            <span>0%</span>
-          </div>
-          <div className="dash-pipe-bars">
-            {pipelineRows.map((row, idx) => {
-              const h = Math.max(8, Math.round((Number(row.count || 0) / pipelineMax) * 100));
-              const hue = 198 + idx * 24;
-              return (
-                <div key={row.stageIndex} className="dash-pipe-col" title={`${row.label}: ${row.count}`}>
-                  <div className="dash-pipe-bar-wrap">
-                    <span
-                      className={`dash-pipe-bar ${hoveredStage === row.stageIndex ? "is-hovered" : ""}`}
-                      style={{ height: `${h}%`, background: `hsl(${hue} 78% 48%)` }}
-                      onMouseEnter={() => setHoveredStage(row.stageIndex)}
-                      onMouseLeave={() => setHoveredStage(null)}
-                    />
-                  </div>
-                  <small>{idx + 1}</small>
-                </div>
-              );
-            })}
-          </div>
-          <p className="dash-pipe-note">Stages 1-{pipelineRows.length} (hover bars for details)</p>
-          <div className="dash-pipe-hover">
-            {hoveredStage == null ? (
-              <span>Hover a bar to see stage details.</span>
-            ) : (
-              (() => {
-                const row = pipelineRows.find((x) => x.stageIndex === hoveredStage);
-                return row ? (
-                  <span>
-                    <strong>{row.label}</strong> • {currentStageCounts.get(row.stageIndex) || 0} batch(es) currently in this stage
-                  </span>
-                ) : (
-                  <span>Hover a bar to see stage details.</span>
-                );
-              })()
-            )}
-          </div>
-        </div>
-      </article>
-    </section>
-  );
-}
-
-function CalendarSection({
-  holidays,
-  events,
-  employees,
-  eventSearch,
-  setEventSearch,
-  eventFilter,
-  setEventFilter,
-  calendarShowArchived,
-  setCalendarShowArchived,
-  eventSummary,
-  filteredEvents,
-  setEditingEventId,
-  setNewEvent,
-  setModalType,
-  deleteData,
-  patchData,
-  loadAll,
-  setBackendOffline,
-}) {
-  const todayYmd = dayjs().format("YYYY-MM-DD");
-  const [selectedEvent, setSelectedEvent] = useState(null);
-  const [viewMonth, setViewMonth] = useState(() => dayjs().format("YYYY-MM"));
-  const [selectedDate, setSelectedDate] = useState(todayYmd);
-  const ym = viewMonth;
-
-  const { calendarCells, monthLabel } = useMemo(() => {
-    const first = dayjs(`${ym}-01`);
-    const startPad = first.day();
-    const dim = first.daysInMonth();
-    const cells = [];
-    for (let i = 0; i < startPad; i++) cells.push({ type: "pad" });
-    for (let d = 1; d <= dim; d++) {
-      const dateStr = first.date(d).format("YYYY-MM-DD");
-      cells.push({ type: "day", day: d, dateStr });
-    }
-    while (cells.length % 7 !== 0) cells.push({ type: "pad" });
-    return { calendarCells: cells, monthLabel: first.format("MMMM YYYY") };
-  }, [ym]);
-
-  const visibleCalendarEvents = useMemo(
-    () => (calendarShowArchived ? events : events.filter((e) => !e.archived)),
-    [events, calendarShowArchived]
-  );
-
-  const eventsByDate = useMemo(() => {
-    const m = {};
-    for (const ev of visibleCalendarEvents) {
-      if (!ev?.date?.startsWith(ym)) continue;
-      (m[ev.date] ||= []).push(ev);
-    }
-    return m;
-  }, [visibleCalendarEvents, ym]);
-
-  const holidaysByDate = useMemo(() => {
-    const m = {};
-    for (const h of holidays) {
-      if (!h?.date?.startsWith(ym)) continue;
-      (m[h.date] ||= []).push(h);
-    }
-    return m;
-  }, [holidays, ym]);
-
-  const birthdaysByDate = useMemo(() => {
-    const m = {};
-    const year = dayjs(`${ym}-01`).year();
-    for (const emp of employees) {
-      if (!emp.birthday || !/^\d{4}-\d{2}-\d{2}$/.test(emp.birthday)) continue;
-      const bd = dayjs(emp.birthday);
-      if (!bd.isValid()) continue;
-      const occ = dayjs(`${year}-${bd.format("MM-DD")}`);
-      if (!occ.isValid()) continue;
-      const key = occ.format("YYYY-MM-DD");
-      if (!key.startsWith(ym)) continue;
-      (m[key] ||= []).push({ id: emp.id, name: emp.name });
-    }
-    return m;
-  }, [employees, ym]);
-
-  const selectedHolidays = holidaysByDate[selectedDate] || [];
-  const selectedBirthdays = birthdaysByDate[selectedDate] || [];
-  const selectedEvents = eventsByDate[selectedDate] || [];
-
-  const goPrevMonth = () => {
-    const nm = dayjs(`${ym}-01`).subtract(1, "month").format("YYYY-MM");
-    setViewMonth(nm);
-    setSelectedDate(`${nm}-01`);
-  };
-
-  const goNextMonth = () => {
-    const nm = dayjs(`${ym}-01`).add(1, "month").format("YYYY-MM");
-    setViewMonth(nm);
-    setSelectedDate(`${nm}-01`);
-  };
-
-  const goToday = () => {
-    const t = dayjs().format("YYYY-MM");
-    setViewMonth(t);
-    setSelectedDate(todayYmd);
-  };
-
-  const openAddEvent = () => {
-    setEditingEventId(null);
-    setNewEvent({ title: "", date: selectedDate, time: "09:00", description: "" });
-    setModalType("event");
-  };
-
-  const dowLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-  return (
-    <div className="task-tracker-page task-tracker-page--stacked cal-app">
-      <header className="task-tracker-intro">
-        <span className="task-tracker-eyebrow">Scheduling</span>
-        <h2 className="task-tracker-title">Event</h2>
-        <p className="task-tracker-lede">
-          Plan dates, track upcoming activities, and manage events from one workspace. PH holidays and staff birthdays are
-          blended into your monthly calendar automatically.
-        </p>
-      </header>
-
-      <div className="tracker-summary tracker-summary--row">
-        <article className="tracker-kpi">
-          <small>Active events</small>
-          <strong>{eventSummary.total}</strong>
-        </article>
-        <article className="tracker-kpi">
-          <small>Today</small>
-          <strong>{eventSummary.today}</strong>
-        </article>
-        <article className="tracker-kpi">
-          <small>Upcoming</small>
-          <strong>{eventSummary.upcoming}</strong>
-        </article>
-        <article className="tracker-kpi">
-          <small>Archived</small>
-          <strong>{eventSummary.archived}</strong>
-        </article>
-      </div>
-
-      <div className="task-tracker-filters-card">
-        <div className="task-tracker-filters-label">Filter &amp; list</div>
-        <div className="task-tracker-toolbar cal-app-toolbar">
-          <div className="inline-form task-tracker-filters">
-            <input placeholder="Search events…" value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} />
-            <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)}>
-              <option value="all">All active</option>
-              <option value="today">Today</option>
-              <option value="upcoming">Upcoming</option>
-              <option value="archived">Archived only</option>
-            </select>
-            <label className="cal-checkbox-label">
-              <input
-                type="checkbox"
-                checked={calendarShowArchived}
-                onChange={(e) => setCalendarShowArchived(e.target.checked)}
-              />
-              Show archived on calendar
-            </label>
-          </div>
-          <button type="button" className="task-tracker-add" onClick={openAddEvent}>
-            + Add Event
-          </button>
-        </div>
-      </div>
-
-      <article className="task-tracker-list-card cal-app-event-list-card">
-        <div className="task-tracker-list-heading">
-          <div>
-            <h3 className="task-tracker-list-title">Event timeline</h3>
-            <p className="task-tracker-list-sub">
-              {filteredEvents.length} event{filteredEvents.length === 1 ? "" : "s"}{" "}
-              {filteredEvents.length === 1 ? "matches" : "match"} your filters
-            </p>
-          </div>
-        </div>
-        <div className="table task-list-scroll task-list-scroll--roomy">
-          {filteredEvents.map((ev) => (
-            <div
-              key={ev.id}
-              className={`list-item task-list-item cal-app-event-row ${ev.archived ? "cal-app-event-row--archived" : ""}`}
-              role="button"
-              tabIndex={0}
-              onClick={() => setSelectedEvent(ev)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setSelectedEvent(ev);
-                }
-              }}
-            >
-              <div className="list-main">
-                <strong>{ev.title}</strong>
-                <small>{`${ev.date} · ${ev.time || "—"}`}</small>
-              </div>
-              <div className="list-meta list-meta--crud">
-                <button
-                  type="button"
-                  className="btn-crud"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingEventId(ev.id);
-                    setNewEvent({
-                      title: ev.title,
-                      date: ev.date,
-                      time: ev.time || "09:00",
-                      description: ev.description || "",
-                    });
-                    setModalType("event");
-                  }}
-                >
-                  Edit
-                </button>
-                {!ev.archived ? (
-                  <button
-                    type="button"
-                    className="btn-crud"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        await patchData(`/events/${ev.id}`, { archived: true });
-                        await loadAll();
-                      } catch {
-                        setBackendOffline(true);
-                      }
-                    }}
-                  >
-                    Archive
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-crud"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      try {
-                        await patchData(`/events/${ev.id}`, { archived: false });
-                        await loadAll();
-                      } catch {
-                        setBackendOffline(true);
-                      }
-                    }}
-                  >
-                    Unarchive
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn-crud btn-crud--danger"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (!window.confirm("Delete this event permanently?")) return;
-                    try {
-                      await deleteData(`/events/${ev.id}`);
-                      await loadAll();
-                    } catch {
-                      setBackendOffline(true);
-                    }
-                  }}
-                >
-                  Delete
-                </button>
-                <span className="status-pill">{ev.archived ? "Archived" : "Scheduled"}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </article>
-
-      {selectedEvent && (
-        <div className="event-info-layer" onClick={() => setSelectedEvent(null)}>
-          <div className="event-info-card" onClick={(e) => e.stopPropagation()}>
-            <div className="event-info-head">
-              <h3>Event details</h3>
-              <span className="status-pill">{selectedEvent.archived ? "Archived" : "Scheduled"}</span>
-            </div>
-            <div className="event-info-grid">
-              <div className="event-info-row event-info-row--title">
-                <small>Title</small>
-                <strong>{selectedEvent.title}</strong>
-              </div>
-              <div className="event-info-row">
-                <small>Date</small>
-                <strong>{selectedEvent.date}</strong>
-              </div>
-              <div className="event-info-row">
-                <small>Time</small>
-                <strong>{selectedEvent.time || "—"}</strong>
-              </div>
-              <div className="event-info-row event-info-row--full">
-                <small>Description</small>
-                <p>{selectedEvent.description?.trim() || "No description provided."}</p>
-              </div>
-            </div>
-            <div className="modal-actions">
-              <button type="button" onClick={() => setSelectedEvent(null)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+import { jsonFetch } from "./lib/jsonFetch.js";
+import { COMELEC_NAV_KEY, initialAppNav, normalizeNav, tabs } from "./lib/navStore.js";
+import { staffInitials } from "./lib/strings.js";
+import { buildObSlipPrintHtml } from "./obSlip/printObSlipHtml.js";
+import { tabIcons } from "./icons/tabIcons.jsx";
+import { AuthGate } from "./components/AuthGate.jsx";
+import { DashboardSection } from "./components/DashboardSection.jsx";
+import { EventSection } from "./components/EventSection.jsx";
 
 function App() {
   const [activeTab, setActiveTab] = useState(() => initialAppNav?.tab ?? "Dashboard");
@@ -1639,6 +413,15 @@ function App() {
     }
     advanceTask(selectedTask.id);
   };
+
+  const userDisplayName = useMemo(() => {
+    if (!authUser || typeof authUser !== "object") return "User";
+    const mail = String(authUser.email || "").trim().toLowerCase();
+    const roster = employees.find((e) => String(e.email || "").trim().toLowerCase() === mail);
+    const fromRoster = roster?.name?.trim();
+    const fromAccount = String(authUser.name || "").trim();
+    return fromRoster || fromAccount || mail || "User";
+  }, [authUser, employees]);
 
   const employeesSorted = useMemo(
     () => [...employees].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })),
@@ -2124,7 +907,7 @@ function App() {
         </nav>
         <div className="sidebar-footer">
           <div className="sidebar-user">
-            <p className="sidebar-user-name">{authUser.name || authUser.email}</p>
+            <p className="sidebar-user-name">{userDisplayName}</p>
             <button type="button" className="sidebar-logout" onClick={handleLogout}>
               Log out
             </button>
@@ -2168,7 +951,7 @@ function App() {
             holidays={holidays}
             employees={employees}
             taskLogs={tasksData.logs || []}
-            userDisplayName={String(authUser?.name || authUser?.email || "User").trim() || "User"}
+            userDisplayName={userDisplayName}
             onNavigate={selectTab}
           />
         )}
@@ -2724,9 +1507,23 @@ function App() {
 
             {obPage === "detail" && selectedObSlip && (
               <article className="panel ob-slip-detail-panel">
-                <div className="panel-head panel-head--task-detail">
-                  <h3>{selectedObSlip.name}</h3>
-                  <div className="panel-head-actions">
+                <div className="ob-slip-info-hero">
+                  <div className="ob-slip-info-hero-text">
+                    <p className="ob-slip-info-eyebrow">Official Business Slip</p>
+                    <h3 className="ob-slip-info-name">{selectedObSlip.name}</h3>
+                    <p className="ob-slip-info-sub">{selectedObSlip.position}</p>
+                    <div className="ob-slip-info-chips">
+                      <span className="ob-slip-info-chip">{selectedObSlip.department || "COMELEC"}</span>
+                      <span className="ob-slip-info-chip ob-slip-info-chip--date">{selectedObSlip.date}</span>
+                      <span
+                        className={`status-pill${selectedObSlip.archived ? " status-pill--muted" : ""}`}
+                        title={selectedObSlip.archived ? "Archived slip" : "Active slip"}
+                      >
+                        {selectedObSlip.archived ? "Archived" : "Active"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="panel-head-actions ob-slip-info-hero-actions">
                     <button type="button" className="btn-crud" onClick={() => printSlip(selectedObSlip)}>
                       Print
                     </button>
@@ -2786,49 +1583,44 @@ function App() {
                     </button>
                   </div>
                 </div>
-                <div className="batch-details-card">
-                  <div className="batch-details-head">
-                    <h4>Slip details</h4>
-                    <span className={`status-pill${selectedObSlip.archived ? " status-pill--muted" : ""}`}>
-                      {selectedObSlip.archived ? "Archived" : "Active"}
-                    </span>
-                  </div>
-                  <div className="batch-details-grid">
-                    <div>
-                      <small>Date</small>
-                      <strong>{selectedObSlip.date}</strong>
-                    </div>
-                    <div>
-                      <small>Name</small>
-                      <strong>{selectedObSlip.name}</strong>
-                    </div>
-                    <div>
-                      <small>Position</small>
-                      <strong>{selectedObSlip.position}</strong>
-                    </div>
-                    <div>
-                      <small>Department</small>
-                      <strong>{selectedObSlip.department || "COMELEC"}</strong>
-                    </div>
-                    <div className="batch-details-span-2">
-                      <small>Purpose</small>
-                      <strong>{selectedObSlip.purpose}</strong>
-                    </div>
-                    <div>
-                      <small>Time in</small>
-                      <strong>{selectedObSlip.timeIn}</strong>
-                    </div>
-                    <div>
-                      <small>Time out</small>
-                      <strong>{selectedObSlip.timeOut}</strong>
-                    </div>
-                    {selectedObSlip.createdAt ? (
+
+                <div className="ob-slip-info-layout">
+                  <section className="ob-slip-info-card">
+                    <h4 className="ob-slip-info-card-title">Schedule</h4>
+                    <dl className="ob-slip-info-dl">
                       <div>
-                        <small>Recorded</small>
-                        <strong>{dayjs(selectedObSlip.createdAt).format("MMM D, YYYY h:mm A")}</strong>
+                        <dt>Time in</dt>
+                        <dd>{selectedObSlip.timeIn}</dd>
                       </div>
-                    ) : null}
-                  </div>
+                      <div>
+                        <dt>Time out</dt>
+                        <dd>{selectedObSlip.timeOut}</dd>
+                      </div>
+                      {selectedObSlip.createdAt ? (
+                        <div className="ob-slip-info-dl-span">
+                          <dt>Recorded in system</dt>
+                          <dd>{dayjs(selectedObSlip.createdAt).format("MMM D, YYYY h:mm A")}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </section>
+                  <section className="ob-slip-info-card">
+                    <h4 className="ob-slip-info-card-title">Record</h4>
+                    <dl className="ob-slip-info-dl">
+                      <div className="ob-slip-info-dl-span">
+                        <dt>Employee / staff ID</dt>
+                        <dd>{selectedObSlip.employeeId?.trim() || "—"}</dd>
+                      </div>
+                      <div className="ob-slip-info-dl-span">
+                        <dt>Slip ID</dt>
+                        <dd className="ob-slip-info-mono">{selectedObSlip.id}</dd>
+                      </div>
+                    </dl>
+                  </section>
+                  <section className="ob-slip-info-card ob-slip-info-card--purpose">
+                    <h4 className="ob-slip-info-card-title">Purpose of travel / business</h4>
+                    <p className="ob-slip-info-purpose">{selectedObSlip.purpose}</p>
+                  </section>
                 </div>
               </article>
             )}
@@ -2846,10 +1638,7 @@ function App() {
 
         {activeTab === "Event" && (
           <section className="tracker-layout single">
-            <CalendarSection
-              holidays={holidays}
-              events={events}
-              employees={employees}
+            <EventSection
               eventSearch={eventSearch}
               setEventSearch={setEventSearch}
               eventFilter={eventFilter}
@@ -3557,6 +2346,65 @@ function App() {
                   maxLength={180}
                 />
               </div>
+              {editingEventId ? (
+                (() => {
+                  const evLive = events.find((e) => e.id === editingEventId);
+                  if (!evLive) return null;
+                  return (
+                    <div className="modal-event-manage">
+                      {!evLive.archived ? (
+                        <button
+                          type="button"
+                          className="btn-text modal-event-manage-btn"
+                          onClick={async () => {
+                            try {
+                              await patchData(`/events/${editingEventId}`, { archived: true });
+                              await loadAll();
+                              closeModal();
+                            } catch {
+                              setBackendOffline(true);
+                            }
+                          }}
+                        >
+                          Archive event
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn-text modal-event-manage-btn"
+                          onClick={async () => {
+                            try {
+                              await patchData(`/events/${editingEventId}`, { archived: false });
+                              await loadAll();
+                              closeModal();
+                            } catch {
+                              setBackendOffline(true);
+                            }
+                          }}
+                        >
+                          Restore event
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-text modal-event-manage-btn modal-event-manage-btn--danger"
+                        onClick={async () => {
+                          if (!window.confirm("Delete this event permanently?")) return;
+                          try {
+                            await deleteData(`/events/${editingEventId}`);
+                            closeModal();
+                            await loadAll();
+                          } catch {
+                            setBackendOffline(true);
+                          }
+                        }}
+                      >
+                        Delete event
+                      </button>
+                    </div>
+                  );
+                })()
+              ) : null}
               <div className="modal-actions">
                 <button type="button" onClick={closeModal}>
                   Cancel

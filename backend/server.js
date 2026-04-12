@@ -119,14 +119,25 @@ function csvEscape(val) {
   return str;
 }
 
-/** Minimal RFC-style CSV parser (supports quoted fields). */
-function parseCsv(text) {
+function guessCsvDelimiter(sample) {
+  const first = String(sample).split(/\r?\n/)[0] || "";
+  const commas = (first.match(/,/g) || []).length;
+  const semis = (first.match(/;/g) || []).length;
+  const tabs = (first.match(/\t/g) || []).length;
+  if (tabs > 0 && tabs >= commas && tabs >= semis) return "\t";
+  if (semis > commas) return ";";
+  return ",";
+}
+
+/** Minimal delimited parser (supports quoted fields). */
+function parseDelimited(text, delimiter = ",") {
   const rows = [];
   let row = [];
   let field = "";
   let i = 0;
   let inQuotes = false;
   const s = String(text).replace(/^\uFEFF/, "");
+  const delim = delimiter;
   while (i < s.length) {
     const c = s[i];
     if (inQuotes) {
@@ -149,7 +160,7 @@ function parseCsv(text) {
       i++;
       continue;
     }
-    if (c === ",") {
+    if (c === delim) {
       row.push(field);
       field = "";
       i++;
@@ -173,6 +184,54 @@ function parseCsv(text) {
   row.push(field);
   if (row.some((cell) => String(cell).trim() !== "")) rows.push(row);
   return rows;
+}
+
+function normalizeCsvHeaderLabel(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\u00a0/g, " ")
+    .replace(/[\s_]+/g, "");
+}
+
+const OB_HEADER_FIELD = {
+  date: "date",
+  name: "name",
+  position: "position",
+  department: "department",
+  purpose: "purpose",
+  timein: "timeIn",
+  timeout: "timeOut",
+  archived: "archived",
+};
+
+/** Positional rows: archived is last column, or column 8 when legacy files had EmployeeId before Archived. */
+function positionalArchivedFromRow(row) {
+  const c8 = String(row[8] ?? "").trim();
+  if (/^(true|false|1|0|yes|no)$/i.test(c8)) return /^(true|1|yes)$/i.test(c8);
+  const c7 = String(row[7] ?? "").trim();
+  return /^(true|1|yes)$/i.test(c7);
+}
+
+function mapObHeaderRow(headerCells) {
+  const col = {};
+  for (let i = 0; i < headerCells.length; i++) {
+    const field = OB_HEADER_FIELD[normalizeCsvHeaderLabel(headerCells[i])];
+    if (field) col[field] = i;
+  }
+  return col;
+}
+
+function looksLikeObHeaderRow(cells) {
+  const keys = new Set(cells.map((c) => normalizeCsvHeaderLabel(c)).filter(Boolean));
+  return keys.has("date") && keys.has("name");
+}
+
+function obCell(row, colMap, field, fallbackIndex) {
+  const i = colMap[field];
+  if (i != null && i >= 0 && i < row.length) return String(row[i] ?? "").trim();
+  if (fallbackIndex != null && fallbackIndex >= 0 && fallbackIndex < row.length) return String(row[fallbackIndex] ?? "").trim();
+  return "";
 }
 
 function hashPassword(password) {
@@ -687,13 +746,11 @@ app.get("/api/ob-slips/export-excel", async (req, res) => {
       return res.status(400).json({ error: "No slips match the selected IDs." });
     }
   }
-  const headers = ["Date", "Name", "Position", "Department", "Purpose", "Time In", "Time Out", "EmployeeId", "Archived"];
+  const headers = ["Date", "Name", "Position", "Department", "Purpose", "Time In", "Time Out", "Archived"];
   const lines = [
     headers.join(","),
     ...slips.map((s) =>
-      [s.date, s.name, s.position, s.department, s.purpose, s.timeIn, s.timeOut, s.employeeId || "", s.archived ? "true" : "false"]
-        .map(csvEscape)
-        .join(",")
+      [s.date, s.name, s.position, s.department, s.purpose, s.timeIn, s.timeOut, s.archived ? "true" : "false"].map(csvEscape).join(",")
     ),
   ];
   const bom = "\uFEFF";
@@ -713,7 +770,8 @@ app.post("/api/ob-slips/import-excel", upload.single("file"), async (req, res) =
       /* ignore */
     }
     return res.status(400).json({
-      error: "Import a .csv file. In Excel: File → Save As → CSV, or use Export Excel from this app and edit that file.",
+      error:
+        "Import a delimited text file (.csv). In Excel: File → Save As → CSV (UTF-8). Comma, semicolon, or tab separators are accepted, and column order can match Export or use the header row (Date, Name, …).",
     });
   }
   await db.read();
@@ -727,29 +785,40 @@ app.post("/api/ob-slips/import-excel", upload.single("file"), async (req, res) =
       /* ignore */
     }
   }
-  const rows = parseCsv(text);
+  const delim = guessCsvDelimiter(text);
+  const rows = parseDelimited(text, delim);
   if (rows.length === 0) return res.status(400).json({ error: "File is empty." });
 
   let startIdx = 0;
-  if (rows.length && /^date$/i.test(String(rows[0][0] ?? "").trim())) startIdx = 1;
+  let colMap = {};
+  if (rows.length && looksLikeObHeaderRow(rows[0])) {
+    colMap = mapObHeaderRow(rows[0]);
+    startIdx = 1;
+  } else if (rows.length && /^date$/i.test(String(rows[0][0] ?? "").trim())) {
+    startIdx = 1;
+  }
 
   const dataRows = rows.slice(startIdx);
 
   const added = [];
   for (const row of dataRows) {
     if (!row || row.every((c) => !String(c ?? "").trim())) continue;
+    const archived =
+      colMap.archived != null
+        ? /^(true|1|yes)$/i.test(obCell(row, colMap, "archived", null))
+        : positionalArchivedFromRow(row);
     const slip = {
       id: uuid(),
-      date: String(row[0] ?? "").trim() || todayDate(),
-      name: String(row[1] ?? "").trim() || "Imported",
-      position: String(row[2] ?? "").trim() || "N/A",
-      department: String(row[3] ?? "").trim() || "COMELEC",
-      purpose: String(row[4] ?? "").trim() || "Imported",
-      timeIn: String(row[5] ?? "").trim() || "08:00",
-      timeOut: String(row[6] ?? "").trim() || "17:00",
+      date: obCell(row, colMap, "date", 0) || todayDate(),
+      name: obCell(row, colMap, "name", 1) || "Imported",
+      position: obCell(row, colMap, "position", 2) || "N/A",
+      department: obCell(row, colMap, "department", 3) || "COMELEC",
+      purpose: obCell(row, colMap, "purpose", 4) || "Imported",
+      timeIn: obCell(row, colMap, "timeIn", 5) || "08:00",
+      timeOut: obCell(row, colMap, "timeOut", 6) || "17:00",
       createdAt: new Date().toISOString(),
-      employeeId: row.length > 7 ? String(row[7] ?? "").trim() : "",
-      archived: row.length > 8 && /^(true|1|yes)$/i.test(String(row[8] ?? "").trim()),
+      employeeId: "",
+      archived,
     };
     db.data.obSlips.push(slip);
     added.push(slip);
