@@ -83,6 +83,58 @@ function createTables() {
   if (!hasProfileImage) {
     sqlDb.exec(`ALTER TABLE employees ADD COLUMN profile_image TEXT NOT NULL DEFAULT ''`);
   }
+
+  const taskColNames = new Set(sqlDb.prepare("PRAGMA table_info(tasks)").all().map((c) => c.name));
+  const addTaskCol = (name, defSql) => {
+    if (!taskColNames.has(name)) {
+      sqlDb.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${defSql}`);
+      taskColNames.add(name);
+    }
+  };
+  addTaskCol("date_from", "TEXT NOT NULL DEFAULT ''");
+  addTaskCol("date_to", "TEXT NOT NULL DEFAULT ''");
+  addTaskCol("assignee", "TEXT NOT NULL DEFAULT ''");
+  addTaskCol("status", "TEXT NOT NULL DEFAULT 'In Progress'");
+  addTaskCol("notes", "TEXT NOT NULL DEFAULT ''");
+  addTaskCol("archived", "INTEGER NOT NULL DEFAULT 0");
+  addTaskCol("created_at", "TEXT NOT NULL DEFAULT ''");
+  addTaskCol("updated_at", "TEXT NOT NULL DEFAULT ''");
+}
+
+function normalizeTaskRow(r) {
+  const updatesJson = r.updatesJson;
+  const hasNewDates = r.dateFrom && String(r.dateFrom).trim().length >= 10;
+  if (hasNewDates) {
+    return {
+      id: r.id,
+      title: r.title,
+      dateFrom: String(r.dateFrom).slice(0, 10),
+      dateTo: String(r.dateTo || r.dateFrom).slice(0, 10),
+      assignee: String(r.assignee || ""),
+      status: String(r.status || "In Progress"),
+      notes: String(r.notes || ""),
+      archived: Boolean(r.archived),
+      createdAt: r.createdAt || new Date().toISOString(),
+      updatedAt: r.updatedAt || r.createdAt || new Date().toISOString(),
+    };
+  }
+  const updates = safeJsonParse(updatesJson, []);
+  const last = updates[updates.length - 1];
+  const first = updates[0];
+  const LEGACY_FINAL = 6;
+  const batchDate = r.batchDate || "";
+  return {
+    id: r.id,
+    title: r.title,
+    dateFrom: batchDate,
+    dateTo: batchDate,
+    assignee: String(last?.assignedStaff || first?.assignedStaff || "Unassigned"),
+    status: Number(r.currentStage) >= LEGACY_FINAL ? "Completed" : "In Progress",
+    notes: updates.map((u) => u.note).filter(Boolean).join("\n"),
+    archived: false,
+    createdAt: first?.at || new Date().toISOString(),
+    updatedAt: last?.at || first?.at || new Date().toISOString(),
+  };
 }
 
 /**
@@ -170,15 +222,13 @@ function loadState() {
     .map((s) => ({ ...s, archived: Boolean(s.archived) }));
 
   const taskRows = sqlDb
-    .prepare(`SELECT id, title, batch_date AS batchDate, current_stage AS currentStage, updates_json FROM tasks ORDER BY rowid`)
+    .prepare(
+      `SELECT id, title, batch_date AS batchDate, current_stage AS currentStage, updates_json AS updatesJson,
+       date_from AS dateFrom, date_to AS dateTo, assignee, status, notes, archived, created_at AS createdAt, updated_at AS updatedAt
+       FROM tasks ORDER BY rowid`
+    )
     .all();
-  const tasks = taskRows.map((r) => ({
-    id: r.id,
-    title: r.title,
-    batchDate: r.batchDate,
-    currentStage: r.currentStage,
-    updates: safeJsonParse(r.updates_json, []),
-  }));
+  const tasks = taskRows.map((r) => normalizeTaskRow(r));
 
   const logRows = sqlDb
     .prepare(
@@ -233,8 +283,8 @@ function saveState(data) {
      VALUES (@id, @date, @name, @position, @department, @purpose, @timeIn, @timeOut, @createdAt, @archived, @employeeId)`
   );
   const insTask = sqlDb.prepare(
-    `INSERT INTO tasks (id, title, batch_date, current_stage, updates_json)
-     VALUES (@id, @title, @batchDate, @currentStage, @updatesJson)`
+    `INSERT INTO tasks (id, title, batch_date, current_stage, updates_json, date_from, date_to, assignee, status, notes, archived, created_at, updated_at)
+     VALUES (@id, @title, @batchDate, @currentStage, @updatesJson, @dateFrom, @dateTo, @assignee, @status, @notes, @archived, @createdAt, @updatedAt)`
   );
   const insLog = sqlDb.prepare(
     `INSERT INTO task_logs (id, at, action, task_id, batch_title, batch_date, details_json)
@@ -296,12 +346,23 @@ function saveState(data) {
       });
     }
     for (const t of data.tasks || []) {
+      const dateFrom = t.dateFrom || t.batchDate || "";
+      const dateTo = t.dateTo || t.batchDate || "";
+      const anchor = dateFrom || dateTo;
       insTask.run({
         id: t.id,
         title: t.title ?? "",
-        batchDate: t.batchDate ?? "",
-        currentStage: t.currentStage ?? 0,
-        updatesJson: JSON.stringify(t.updates || []),
+        batchDate: anchor,
+        currentStage: 0,
+        updatesJson: "[]",
+        dateFrom: dateFrom || anchor,
+        dateTo: dateTo || anchor,
+        assignee: t.assignee ?? "",
+        status: t.status ?? "In Progress",
+        notes: t.notes ?? "",
+        archived: t.archived ? 1 : 0,
+        createdAt: t.createdAt ?? new Date().toISOString(),
+        updatedAt: t.updatedAt ?? new Date().toISOString(),
       });
     }
     for (const log of data.taskLogs || []) {

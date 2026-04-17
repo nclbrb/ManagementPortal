@@ -9,9 +9,6 @@ export function DashboardSection({
   events,
   holidays = [],
   employees = [],
-  taskLogs = [],
-  taskItems = [],
-  taskStages = [],
   userDisplayName = "User",
   onNavigate,
 }) {
@@ -100,80 +97,6 @@ export function DashboardSection({
   const now = dayjs();
   const greeting =
     now.hour() < 12 ? "Good morning" : now.hour() < 17 ? "Good afternoon" : "Good evening";
-  const [pipelineRange, setPipelineRange] = useState("monthly");
-  const [hoveredStage, setHoveredStage] = useState(null);
-  const canDeriveTaskStageStats = Array.isArray(taskStages) && taskStages.length > 0 && Array.isArray(taskItems);
-  const derivedTasksByStage = useMemo(() => {
-    if (!canDeriveTaskStageStats) return [];
-    const counts = new Map(taskStages.map((_, idx) => [idx, 0]));
-    for (const task of taskItems) {
-      const stageIndex = Number(task?.currentStage);
-      if (!Number.isInteger(stageIndex) || !counts.has(stageIndex)) continue;
-      counts.set(stageIndex, (counts.get(stageIndex) || 0) + 1);
-    }
-    const total = taskItems.length || 1;
-    return taskStages.map((label, stageIndex) => {
-      const count = counts.get(stageIndex) || 0;
-      return {
-        stageIndex,
-        label: String(label || `Stage ${stageIndex + 1}`),
-        count,
-        pct: Math.round((count / total) * 1000) / 10,
-      };
-    });
-  }, [canDeriveTaskStageStats, taskItems, taskStages]);
-  const pipelineBaseRows = useMemo(
-    () => (canDeriveTaskStageStats ? derivedTasksByStage : dashboard.tasksByStage || []),
-    [canDeriveTaskStageStats, derivedTasksByStage, dashboard.tasksByStage]
-  );
-  const taskKpis = useMemo(() => {
-    if (!canDeriveTaskStageStats) {
-      return {
-        total: dashboard.tasks?.total ?? 0,
-        inProgress: dashboard.tasks?.inProgress ?? 0,
-        completed: (dashboard.tasksByStage || []).slice(-1)[0]?.count || 0,
-      };
-    }
-    const total = taskItems.length;
-    const finalStageIdx = Math.max(taskStages.length - 1, 0);
-    const completed = taskItems.filter((t) => Number(t?.currentStage) === finalStageIdx).length;
-    const inProgress = Math.max(total - completed, 0);
-    return { total, inProgress, completed };
-  }, [canDeriveTaskStageStats, dashboard.tasks, dashboard.tasksByStage, taskItems, taskStages.length]);
-  const pipelineRows = useMemo(() => {
-    if (!Array.isArray(taskItems) || taskItems.length === 0) {
-      return pipelineBaseRows.map((row) => ({ ...row, count: 0, pct: 0 }));
-    }
-    const nowTs = Date.now();
-    const msByRange = {
-      weekly: 7 * 24 * 60 * 60 * 1000,
-      monthly: 30 * 24 * 60 * 60 * 1000,
-      yearly: 365 * 24 * 60 * 60 * 1000,
-    };
-    const cutoff = nowTs - (msByRange[pipelineRange] || msByRange.monthly);
-    const counts = new Map(pipelineBaseRows.map((r) => [r.stageIndex, 0]));
-    for (const task of taskItems) {
-      const latestUpdate = Array.isArray(task?.updates) && task.updates.length > 0 ? task.updates[task.updates.length - 1] : null;
-      const activityTs = Date.parse(latestUpdate?.at || task?.batchDate || "");
-      if (!Number.isFinite(activityTs) || activityTs < cutoff) continue;
-      const currentStage = Number(task?.currentStage);
-      if (!Number.isInteger(currentStage) || !counts.has(currentStage)) continue;
-      counts.set(currentStage, (counts.get(currentStage) || 0) + 1);
-    }
-    const total = Array.from(counts.values()).reduce((a, b) => a + b, 0) || 1;
-    return pipelineBaseRows.map((r) => {
-      const c = counts.get(r.stageIndex) || 0;
-      return { ...r, count: c, pct: Math.round((c / total) * 1000) / 10 };
-    });
-  }, [pipelineBaseRows, pipelineRange, taskItems]);
-  const currentStageCounts = useMemo(() => new Map(pipelineBaseRows.map((r) => [r.stageIndex, Number(r.count || 0)])), [pipelineBaseRows]);
-  const pipelineMax = Math.max(1, ...pipelineRows.map((r) => Number(r.count || 0)));
-  const busiestStage = useMemo(() => {
-    // Busiest should reflect current live task distribution, not historical logs.
-    const best = pipelineBaseRows.reduce((acc, row) => (row.count > (acc?.count ?? -1) ? row : acc), null);
-    return best && Number(best.count || 0) > 0 ? best : null;
-  }, [pipelineBaseRows]);
-  const currentCompleted = taskKpis.completed;
 
   useEffect(() => {
     if (dayScrollRef.current) dayScrollRef.current.scrollTop = 0;
@@ -253,10 +176,10 @@ export function DashboardSection({
           </span>
         </div>
         <div className="dash-stat-card">
-          <span className="dash-stat-label">Task batches</span>
+          <span className="dash-stat-label">Tasks</span>
           <strong>{dashboard.tasks?.total ?? 0}</strong>
           <span className="dash-stat-hint">
-            {dashboard.tasks?.completed ?? 0} filed · {dashboard.tasks?.inProgress ?? 0} in progress
+            {dashboard.tasks?.completed ?? 0} completed · {dashboard.tasks?.inProgress ?? 0} in progress
           </span>
         </div>
         <div className="dash-stat-card">
@@ -409,10 +332,10 @@ export function DashboardSection({
 
           <article className="panel dash-panel-recent">
             <div className="panel-head">
-              <h3>Recent batches</h3>
+              <h3>Recent tasks</h3>
               <input
                 className="dash-search"
-                placeholder="Search batches…"
+                placeholder="Search tasks…"
                 value={dashboardSearch}
                 onChange={(e) => setDashboardSearch(e.target.value)}
               />
@@ -420,7 +343,7 @@ export function DashboardSection({
             <div className="dash-recent-scroll" ref={recentScrollRef}>
               <div className="table dash-recent-table">
                 {dashboardRecent.length === 0 ? (
-                  <p className="dash-muted">No batches match your search.</p>
+                  <p className="dash-muted">No tasks match your search.</p>
                 ) : (
                   dashboardRecent.map((t) => (
                     <div
@@ -433,10 +356,10 @@ export function DashboardSection({
                     >
                       <div className="list-main">
                         <strong>{t.title}</strong>
-                        <small>{`Batch date: ${t.batchDate}`}</small>
+                        <small>{`${t.dateFrom || t.batchDate || "—"} → ${t.dateTo || t.batchDate || "—"}`}</small>
                       </div>
                       <div className="list-meta">
-                        <span className="status-pill">{`Stage ${t.currentStage}`}</span>
+                        <span className="status-pill">{t.status || "In Progress"}</span>
                         <span className="list-arrow">›</span>
                       </div>
                     </div>
@@ -447,69 +370,6 @@ export function DashboardSection({
           </article>
         </div>
       </div>
-
-      <article className="panel dash-stage-panel">
-        <div className="panel-head">
-          <h3>Task Chart</h3>
-          <label className="dash-pipe-filter-wrap">
-            <span>Range</span>
-            <select value={pipelineRange} onChange={(e) => setPipelineRange(e.target.value)}>
-              <option value="weekly">Weekly</option>
-              <option value="monthly">Monthly</option>
-              <option value="yearly">Yearly</option>
-            </select>
-          </label>
-        </div>
-        <div className="dash-pipe-kpis">
-          <span>Total: <strong>{taskKpis.total}</strong></span>
-          <span>In Progress: <strong>{taskKpis.inProgress}</strong></span>
-          <span>Completed: <strong>{currentCompleted}</strong></span>
-          <span>Busiest: <strong>{busiestStage ? `${busiestStage.label} (${busiestStage.count})` : "N/A"}</strong></span>
-        </div>
-        <div className="dash-pipe-chart">
-          <div className="dash-pipe-axis">
-            <span>100%</span>
-            <span>50%</span>
-            <span>0%</span>
-          </div>
-          <div className="dash-pipe-bars">
-            {pipelineRows.map((row, idx) => {
-              const h = Math.max(8, Math.round((Number(row.count || 0) / pipelineMax) * 100));
-              const hue = 198 + idx * 24;
-              return (
-                <div key={row.stageIndex} className="dash-pipe-col" title={`${row.label}: ${row.count}`}>
-                  <div className="dash-pipe-bar-wrap">
-                    <span
-                      className={`dash-pipe-bar ${hoveredStage === row.stageIndex ? "is-hovered" : ""}`}
-                      style={{ height: `${h}%`, background: `hsl(${hue} 78% 48%)` }}
-                      onMouseEnter={() => setHoveredStage(row.stageIndex)}
-                      onMouseLeave={() => setHoveredStage(null)}
-                    />
-                  </div>
-                  <small>{idx + 1}</small>
-                </div>
-              );
-            })}
-          </div>
-          <p className="dash-pipe-note">Stages 1-{pipelineRows.length} (hover bars for details)</p>
-          <div className="dash-pipe-hover">
-            {hoveredStage == null ? (
-              <span>Hover a bar to see stage details.</span>
-            ) : (
-              (() => {
-                const row = pipelineRows.find((x) => x.stageIndex === hoveredStage);
-                return row ? (
-                  <span>
-                    <strong>{row.label}</strong> • {currentStageCounts.get(row.stageIndex) || 0} batch(es) currently in this stage
-                  </span>
-                ) : (
-                  <span>Hover a bar to see stage details.</span>
-                );
-              })()
-            )}
-          </div>
-        </div>
-      </article>
     </section>
   );
 }

@@ -62,14 +62,11 @@ const upload = multer({ dest: uploadsDir });
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: "5mb" }));
 
-const taskStages = [
-  "Collected",
-  "For Verification",
-  "For Correction",
-  "Organized by Precinct (Alphabetical)",
-  "For Approval",
-  "Final Filing",
-];
+const TASK_STATUSES = ["In Progress", "Completed", "Cancelled", "On Hold"];
+
+function isValidStatus(s) {
+  return TASK_STATUSES.includes(String(s || ""));
+}
 
 const db = {
   data: {
@@ -102,13 +99,14 @@ function todayDate() {
 
 function pushTaskLog(action, task, details = {}) {
   db.data.taskLogs ||= [];
+  const refDate = task?.dateFrom || task?.batchDate || "";
   db.data.taskLogs.push({
     id: uuid(),
     at: new Date().toISOString(),
     action,
     taskId: task?.id || "",
     batchTitle: task?.title || "",
-    batchDate: task?.batchDate || "",
+    batchDate: refDate,
     details,
   });
   if (db.data.taskLogs.length > 300) {
@@ -311,7 +309,7 @@ function emitRealtime() {
   io.emit("realtime:update", {
     dashboard: getDashboardData(),
     tasks: {
-      stages: taskStages,
+      statuses: TASK_STATUSES,
       items: db.data.tasks,
       logs: db.data.taskLogs || [],
     },
@@ -327,38 +325,26 @@ function getDashboardData() {
   const today = todayDate();
   const now = dayjs();
 
-  const taskTotals = db.data.tasks.reduce(
+  const activeTasks = (db.data.tasks || []).filter((t) => !t.archived);
+  const taskTotals = activeTasks.reduce(
     (acc, task) => {
       acc.total += 1;
-      if (task.currentStage === taskStages.length - 1) acc.completed += 1;
-      else acc.inProgress += 1;
+      if (task.status === "Completed") acc.completed += 1;
+      else if (task.status === "In Progress") acc.inProgress += 1;
+      else acc.pending += 1;
       return acc;
     },
-    { total: 0, inProgress: 0, completed: 0 }
+    { total: 0, inProgress: 0, completed: 0, pending: 0 }
   );
 
-  const byStage = taskStages.map((label, stageIndex) => ({
-    stageIndex,
-    label,
-    count: db.data.tasks.filter((t) => t.currentStage === stageIndex).length,
-  }));
-
-  const totalTasks = taskTotals.total || 1;
-  const tasksByStage = byStage.map((row) => ({
-    ...row,
-    pct: Math.round((row.count / totalTasks) * 1000) / 10,
-  }));
-
-  let avgPipelinePct = 0;
-  if (db.data.tasks.length > 0) {
-    const sum = db.data.tasks.reduce((s, t) => s + (t.currentStage + 1) / taskStages.length, 0);
-    avgPipelinePct = Math.round((sum / db.data.tasks.length) * 1000) / 10;
-  }
+  const tasksByStage = [];
 
   const completionRate =
     taskTotals.total > 0 ? Math.round((taskTotals.completed / taskTotals.total) * 1000) / 10 : 0;
 
-  const inCorrection = db.data.tasks.filter((t) => t.currentStage === 2).length;
+  const avgPipelinePct = completionRate;
+
+  const inCorrection = 0;
 
   const employeesByType = db.data.employees.reduce(
     (acc, e) => {
@@ -396,33 +382,26 @@ function getDashboardData() {
     });
 
   const activityFeed = [];
-  for (const task of db.data.tasks) {
-    for (const u of task.updates || []) {
-      activityFeed.push({
-        id: `${task.id}-${u.at}`,
-        batchTitle: task.title,
-        stageLabel: taskStages[u.stage] || `Stage ${u.stage}`,
-        stageIndex: u.stage,
-        at: u.at,
-        note: (u.note || "").slice(0, 160),
-        assignedStaff: u.assignedStaff || "",
-      });
-    }
+  for (const task of db.data.tasks || []) {
+    if (task.archived) continue;
+    activityFeed.push({
+      id: `${task.id}-activity`,
+      batchTitle: task.title,
+      stageLabel: task.status || "In Progress",
+      stageIndex: 0,
+      at: task.updatedAt || task.createdAt,
+      note: (task.notes || "").slice(0, 160),
+      assignedStaff: task.assignee || "",
+    });
   }
   activityFeed.sort((a, b) => new Date(b.at) - new Date(a.at));
   const recentActivity = activityFeed.slice(0, 14);
 
   const insights = [];
-  if (inCorrection > 0) {
-    insights.push({
-      type: "warning",
-      text: `${inCorrection} batch${inCorrection > 1 ? "es" : ""} in Correction — review before advancing.`,
-    });
-  }
   if (taskTotals.inProgress > 0 && completionRate >= 50) {
     insights.push({
       type: "positive",
-      text: `${completionRate}% of batches reached Final Filing. Keep the pipeline moving.`,
+      text: `${completionRate}% of active tasks are completed.`,
     });
   }
   const todayHolidayCount = holidayRows.filter((h) => h.date === today).length;
@@ -452,7 +431,10 @@ function getDashboardData() {
     upcomingEvents,
     recentActivity,
     insights,
-    recentTasks: db.data.tasks.slice(-5).reverse(),
+    recentTasks: [...(db.data.tasks || [])]
+      .filter((t) => !t.archived)
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .slice(0, 5),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -841,33 +823,42 @@ app.post("/api/ob-slips/import-excel", upload.single("file"), async (req, res) =
 
 app.get("/api/tasks", async (_req, res) => {
   await db.read();
-  res.json({ stages: taskStages, items: db.data.tasks, logs: db.data.taskLogs || [] });
+  res.json({ statuses: TASK_STATUSES, items: db.data.tasks, logs: db.data.taskLogs || [] });
 });
 
 app.post("/api/tasks", async (req, res) => {
   await db.read();
-  const { title, assignedStaff = "Unassigned", note = "", batchDate = todayDate() } = req.body;
+  const { title, dateFrom, dateTo, assignee = "", notes = "", status = "In Progress" } = req.body;
   if (!title || !String(title).trim()) {
-    return res.status(400).json({ error: "Batch name is required." });
+    return res.status(400).json({ error: "Task title is required." });
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(batchDate))) {
-    return res.status(400).json({ error: "Batch date must be in YYYY-MM-DD format." });
+  const df = String(dateFrom || "").trim();
+  const dt = String(dateTo || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(df) || !/^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+    return res.status(400).json({ error: "Date range must use YYYY-MM-DD format." });
   }
-  const hasExistingDate = db.data.tasks.some((t) => t.batchDate === String(batchDate));
-  if (hasExistingDate) {
-    return res.status(400).json({ error: "This batch date is already used. Choose a different date." });
+  if (df > dt) {
+    return res.status(400).json({ error: "Start date cannot be after end date." });
   }
+  const st = String(status || "In Progress").trim();
+  if (!isValidStatus(st)) {
+    return res.status(400).json({ error: "Invalid status." });
+  }
+  const now = new Date().toISOString();
   const task = {
     id: uuid(),
     title: String(title).trim(),
-    batchDate,
-    currentStage: 0,
-    updates: [
-      { stage: 0, status: "done", assignedStaff, note, at: new Date().toISOString() },
-    ],
+    dateFrom: df,
+    dateTo: dt,
+    assignee: String(assignee || "").trim(),
+    status: st,
+    notes: String(notes || "").trim(),
+    archived: false,
+    createdAt: now,
+    updatedAt: now,
   };
   db.data.tasks.push(task);
-  pushTaskLog("batch-created", task, { stage: 0 });
+  pushTaskLog("task-created", task, { status: task.status });
   await db.write();
   emitRealtime();
   res.status(201).json(task);
@@ -877,23 +868,45 @@ app.patch("/api/tasks/:id", async (req, res) => {
   await db.read();
   const task = db.data.tasks.find((t) => t.id === req.params.id);
   if (!task) return res.status(404).json({ error: "Task not found." });
-  const { title, batchDate } = req.body;
+  const { title, dateFrom, dateTo, assignee, notes, status, archived } = req.body;
   if (title !== undefined) {
     const t = String(title).trim();
     if (!t) return res.status(400).json({ error: "Title cannot be empty." });
     task.title = t;
   }
-  if (batchDate !== undefined) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(batchDate))) {
-      return res.status(400).json({ error: "Batch date must be YYYY-MM-DD." });
+  if (dateFrom !== undefined) {
+    const d = String(dateFrom).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return res.status(400).json({ error: "Start date must be YYYY-MM-DD." });
     }
-    const hasExistingDate = db.data.tasks.some((t) => t.id !== task.id && t.batchDate === String(batchDate));
-    if (hasExistingDate) {
-      return res.status(400).json({ error: "This batch date is already used. Choose a different date." });
-    }
-    task.batchDate = batchDate;
+    task.dateFrom = d;
   }
-  pushTaskLog("batch-updated", task, { title: task.title, batchDate: task.batchDate });
+  if (dateTo !== undefined) {
+    const d = String(dateTo).trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      return res.status(400).json({ error: "End date must be YYYY-MM-DD." });
+    }
+    task.dateTo = d;
+  }
+  if (task.dateFrom && task.dateTo && task.dateFrom > task.dateTo) {
+    return res.status(400).json({ error: "Start date cannot be after end date." });
+  }
+  if (assignee !== undefined) task.assignee = String(assignee || "").trim();
+  if (notes !== undefined) task.notes = String(notes || "").trim();
+  if (status !== undefined) {
+    const st = String(status).trim();
+    if (!isValidStatus(st)) return res.status(400).json({ error: "Invalid status." });
+    task.status = st;
+  }
+  if (archived !== undefined) task.archived = Boolean(archived);
+  task.updatedAt = new Date().toISOString();
+  pushTaskLog("task-updated", task, {
+    title: task.title,
+    dateFrom: task.dateFrom,
+    dateTo: task.dateTo,
+    status: task.status,
+    archived: task.archived,
+  });
   await db.write();
   emitRealtime();
   res.json(task);
@@ -905,55 +918,10 @@ app.delete("/api/tasks/:id", async (req, res) => {
   if (idx === -1) return res.status(404).json({ error: "Task not found." });
   const removed = db.data.tasks[idx];
   db.data.tasks.splice(idx, 1);
-  pushTaskLog("batch-deleted", removed, {});
+  pushTaskLog("task-deleted", removed, {});
   await db.write();
   emitRealtime();
   res.status(204).end();
-});
-
-app.patch("/api/tasks/:id/stage", async (req, res) => {
-  await db.read();
-  const { id } = req.params;
-  const { stage, assignedStaff = "Assigned Staff", note = "" } = req.body;
-  const task = db.data.tasks.find((t) => t.id === id);
-  if (!task) return res.status(404).json({ error: "Task not found." });
-  const nextStage = Number(stage);
-  if (!Number.isInteger(nextStage) || nextStage < 0 || nextStage >= taskStages.length) {
-    return res.status(400).json({ error: "Invalid stage." });
-  }
-
-  // Limitation: prevent skipping stages and only allow valid correction loop.
-  const isForwardStep = nextStage === task.currentStage + 1;
-  const isCorrectionLoop = task.currentStage === 2 && nextStage === 1;
-  if (!isForwardStep && !isCorrectionLoop) {
-    return res.status(400).json({
-      error: "Invalid transition. Only next stage is allowed (or Correction back to Verification).",
-    });
-  }
-
-  const requiredStaffStages = new Set([1, 2, 3, 4]);
-  if (requiredStaffStages.has(nextStage) && !String(assignedStaff).trim()) {
-    return res.status(400).json({ error: "Assigned staff is required for this stage." });
-  }
-
-  task.currentStage = nextStage;
-  task.updates.push({
-    stage: nextStage,
-    status: nextStage === taskStages.length - 1 ? "done" : "in-progress",
-    assignedStaff: String(assignedStaff || "").trim() || "Assigned Staff",
-    note: String(note || "").trim(),
-    at: new Date().toISOString(),
-  });
-  pushTaskLog("stage-updated", task, {
-    stage: nextStage,
-    stageLabel: taskStages[nextStage],
-    assignedStaff: String(assignedStaff || "").trim() || "Assigned Staff",
-    note: String(note || "").trim(),
-  });
-
-  await db.write();
-  emitRealtime();
-  res.json(task);
 });
 
 io.on("connection", () => {

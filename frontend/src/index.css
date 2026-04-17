@@ -51,14 +51,22 @@ body {
   display: grid;
   grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Laptop / small desktop: slightly tighter sidebar */
+@media (min-width: 901px) and (max-width: 1279px) {
+  .layout {
+    grid-template-columns: minmax(210px, 250px) minmax(0, 1fr);
+  }
 }
 
 /* Hamburger (hidden on desktop) */
 .nav-toggle {
   display: none;
   position: fixed;
-  top: 12px;
-  left: 12px;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: max(12px, env(safe-area-inset-left, 0px));
   z-index: 1002;
   width: 44px;
   height: 44px;
@@ -73,6 +81,8 @@ body {
   align-items: center;
   gap: 5px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 .nav-toggle-bar {
@@ -98,6 +108,19 @@ body {
 
 .nav-backdrop {
   display: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent page behind the drawer from scrolling (mobile / narrow) */
+html:has(body.nav-drawer-open) {
+  overflow: hidden;
+}
+
+body.nav-drawer-open {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .sidebar-close {
@@ -118,7 +141,13 @@ body {
 }
 
 .sidebar-close:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: rgba(15, 23, 42, 0.35);
+  color: #f8fafc;
+}
+
+.sidebar-close:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.85);
+  outline-offset: 2px;
 }
 
 .brand {
@@ -324,7 +353,8 @@ button:active {
   opacity: 1;
 }
 
-.sidebar,
+/* Do not animate .sidebar here — softFadeUp sets transform: translateY(), which overrides
+   the mobile drawer transform: translateX() and breaks the menu / click targets. */
 .content,
 .dash-overview,
 .task-tracker-page,
@@ -371,6 +401,18 @@ button:active {
   background: linear-gradient(180deg, #ffffff 0%, var(--mp-page-bg) 100%);
   min-width: 0;
   overflow-x: hidden;
+}
+
+@media (min-width: 901px) and (max-width: 1279px) {
+  .content {
+    padding: 14px 18px;
+  }
+}
+
+@media (min-width: 1440px) {
+  .content {
+    padding: 16px 28px;
+  }
 }
 
 .page-header {
@@ -788,93 +830,6 @@ button:active {
   color: var(--mp-text-soft);
   line-height: 1.4;
 }
-
-.dash-stage-panel {
-  border: 1px solid var(--mp-border-soft);
-  border-radius: 14px;
-  background: var(--mp-surface-card);
-  color: var(--mp-text);
-  box-shadow: 0 2px 14px rgba(15, 23, 42, 0.06);
-}
-.dash-stage-panel .panel-head {
-  display: flex;
-  align-items: center;
-}
-
-.dash-pipe-chart { display: grid; gap: 8px; }
-.dash-pipe-filter-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--mp-text-muted);
-  font-weight: 700;
-  margin-left: auto;
-  margin-right: 0;
-}
-.dash-pipe-filter-wrap select {
-  min-height: 30px;
-  padding: 4px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--mp-border);
-  background: var(--mp-surface-elevated);
-  color: var(--mp-text);
-  font-size: 12px;
-}
-.dash-pipe-kpis {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 12px;
-  margin: 2px 0 8px;
-  font-size: 12px;
-  color: var(--mp-text-muted);
-}
-.dash-pipe-kpis strong { color: var(--mp-accent); }
-.dash-pipe-axis {
-  display: flex;
-  justify-content: space-between;
-  color: var(--mp-text-soft);
-  font-size: 10px;
-  font-weight: 700;
-}
-.dash-pipe-bars {
-  height: 180px;
-  border-radius: 10px;
-  border: 1px solid var(--mp-border-soft);
-  background: linear-gradient(180deg, #f8fafc 0%, var(--mp-surface-elevated) 100%);
-  padding: 8px 10px;
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-  align-items: end;
-}
-.dash-pipe-col { display: grid; gap: 4px; justify-items: center; }
-.dash-pipe-bar-wrap {
-  width: 100%;
-  height: 150px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-}
-.dash-pipe-bar {
-  width: 70%;
-  border-radius: 3px 3px 1px 1px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
-  transition: transform 0.12s ease, filter 0.12s ease;
-}
-.dash-pipe-bar.is-hovered {
-  transform: scaleX(1.08);
-  filter: brightness(1.08);
-}
-.dash-pipe-col small { font-size: 10px; color: var(--mp-text-muted); font-weight: 700; }
-.dash-pipe-note { margin: 0; font-size: 11px; color: var(--mp-text-soft); }
-.dash-pipe-hover {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--mp-text-muted);
-  min-height: 18px;
-}
-.dash-pipe-hover strong { color: var(--mp-accent); }
 
 .dash-main-grid {
   display: grid;
@@ -1389,10 +1344,6 @@ button:active {
     padding: 4px 2px;
   }
 
-  .dash-pipe-kpis {
-    grid-template-columns: 1fr;
-  }
-
   .dash-stats-row {
     grid-template-columns: 1fr;
   }
@@ -1618,8 +1569,8 @@ textarea {
   min-width: 0;
   flex: 1 1 120px;
   max-width: 220px;
-  min-height: var(--ui-control-h);
-  border-radius: var(--ui-control-radius);
+  min-height: 38px;
+  border-radius: 10px;
 }
 
 .task-tracker-filters input[type="date"] {
@@ -1639,6 +1590,78 @@ textarea {
   white-space: nowrap;
   min-height: var(--ui-control-h);
   border-radius: var(--ui-control-radius);
+}
+
+.task-tracker-add--secondary {
+  background: var(--mp-surface-elevated);
+  border: 1px solid var(--mp-border);
+  color: var(--mp-text);
+}
+
+/* App-wide selects — same look as OB slip / modal form (native chevron, white field) */
+.mp-select,
+.modal-field select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--mp-border);
+  background: #ffffff;
+  color: var(--mp-text);
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+}
+
+.mp-select:hover,
+.modal-field select:hover {
+  border-color: var(--mp-accent);
+}
+
+.mp-select:focus,
+.modal-field select:focus {
+  outline: none;
+  border-color: var(--mp-accent);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(41, 39, 150, 0.15);
+}
+
+/* Inline task row status — width cap only */
+.task-styled-select.mp-select {
+  min-width: 0;
+  max-width: 200px;
+  width: auto;
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.task-employee-manual-input {
+  margin-top: 8px;
+  width: 100%;
+  min-height: var(--ui-control-h);
+  padding: 8px 10px;
+  border-radius: var(--ui-control-radius);
+  border: 1px solid var(--mp-border);
+  background: var(--mp-surface-card);
+  font-size: 14px;
+}
+
+.task-field-readonly {
+  cursor: default;
+  background: var(--mp-surface-elevated) !important;
+  color: var(--mp-text) !important;
+  opacity: 1 !important;
+}
+
+.task-view-readonly-form .modal-actions--task-view {
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 
 /*
@@ -1700,7 +1723,8 @@ textarea {
     max-width: none;
   }
 
-  .task-tracker-add {
+  .task-tracker-add,
+  .task-tracker-add--secondary {
     width: 100%;
   }
 
@@ -2849,7 +2873,6 @@ textarea {
 }
 
 .modal-field input,
-.modal-field select,
 .modal-field textarea {
   width: 100%;
   max-width: 100%;
@@ -2864,7 +2887,6 @@ textarea {
 }
 
 .modal-field input:focus,
-.modal-field select:focus,
 .modal-field textarea:focus {
   outline: none;
   border-color: var(--mp-accent);
@@ -2944,9 +2966,11 @@ textarea {
 }
 
 .modal-actions > button:first-child:hover {
-  background: #e3eefc;
+  background: #cfe2f8;
+  color: #0f172a;
+  border-color: #93c5fd;
   transform: none;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
 .modal-actions > button:last-child {
@@ -3033,8 +3057,8 @@ textarea {
 }
 
 .event-modal-close:hover {
-  background: #f1f5f9;
-  color: #475569;
+  background: rgba(15, 23, 42, 0.08);
+  color: #0f172a;
 }
 
 .event-modal-body {
@@ -3539,17 +3563,25 @@ textarea {
     display: block;
   }
 
+  /* Keep main content below the fixed nav layers so taps reach hamburger / backdrop / drawer */
+  .layout > .content {
+    position: relative;
+    z-index: 0;
+  }
+
   .nav-toggle {
     display: flex;
+    z-index: 1005;
   }
 
   .nav-backdrop {
     display: block;
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 1004;
     background: rgba(15, 38, 66, 0.45);
     backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
   }
 
   .layout:not(.nav-open) .nav-backdrop {
@@ -3564,18 +3596,32 @@ textarea {
     height: 100vh;
     height: 100dvh;
     min-height: 0;
-    z-index: 1001;
+    z-index: 1006;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: none;
     border-right: none;
     padding-left: env(safe-area-inset-left, 0);
     padding-bottom: env(safe-area-inset-bottom, 0);
+    padding-top: env(safe-area-inset-top, 0);
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .layout.nav-open .sidebar {
     transform: translateX(0);
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.2);
+  }
+
+  /* Off-canvas drawer must not intercept clicks on the main content */
+  .layout:not(.nav-open) .sidebar {
+    pointer-events: none;
+  }
+
+  /* When open, hide the duplicate menu control so it cannot block the drawer */
+  .layout.nav-open .nav-toggle {
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .sidebar-close {
@@ -3587,6 +3633,8 @@ textarea {
     width: 40px;
     height: 40px;
     flex-shrink: 0;
+    position: absolute;
+    z-index: 5;
   }
 
   /* Room for Ã— so title/subtitle donâ€™t collide */

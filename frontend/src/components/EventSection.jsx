@@ -9,6 +9,8 @@ export function EventSection({
   setCalendarShowArchived,
   eventSummary,
   filteredEvents,
+  eventViewId,
+  setEventViewId,
   setEditingEventId,
   setNewEvent,
   setModalType,
@@ -18,6 +20,11 @@ export function EventSection({
   setBackendOffline,
 }) {
   const todayYmd = dayjs().format("YYYY-MM-DD");
+
+  const openEventView = (ev) => {
+    setEventViewId(ev.id);
+    setModalType("eventView");
+  };
 
   const openEventEditor = (ev) => {
     setEditingEventId(ev.id);
@@ -42,8 +49,8 @@ export function EventSection({
         <span className="task-tracker-eyebrow">Scheduling</span>
         <h2 className="task-tracker-title">Event</h2>
         <p className="task-tracker-lede">
-          Plan dates and upcoming activities. Click a row to open the form, or use the row actions. + Add Event creates
-          a new entry.
+          Plan dates and upcoming activities. Click a row for details, use Edit on the row to change an event, or + Add
+          Event for a new entry.
         </p>
       </header>
 
@@ -71,7 +78,7 @@ export function EventSection({
         <div className="task-tracker-toolbar cal-app-toolbar">
           <div className="inline-form task-tracker-filters">
             <input placeholder="Search events…" value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} />
-            <select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)}>
+            <select className="mp-select" value={eventFilter} onChange={(e) => setEventFilter(e.target.value)}>
               <option value="all">All active</option>
               <option value="today">Today</option>
               <option value="upcoming">Upcoming</option>
@@ -109,11 +116,11 @@ export function EventSection({
               className={`task-item list-item task-list-item event-queue-row${ev.archived ? " event-queue-row--archived" : ""}`}
               role="button"
               tabIndex={0}
-              onClick={() => openEventEditor(ev)}
+              onClick={() => openEventView(ev)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  openEventEditor(ev);
+                  openEventView(ev);
                 }
               }}
             >
@@ -131,6 +138,26 @@ export function EventSection({
                   }}
                 >
                   Edit
+                </button>
+                <button
+                  type="button"
+                  className="btn-crud btn-crud--danger"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!window.confirm("Delete this event permanently?")) return;
+                    try {
+                      await deleteData(`/events/${ev.id}`);
+                      if (eventViewId === ev.id) {
+                        setEventViewId(null);
+                        setModalType("");
+                      }
+                      await loadAll();
+                    } catch {
+                      setBackendOffline(true);
+                    }
+                  }}
+                >
+                  Delete
                 </button>
                 {!ev.archived ? (
                   <button
@@ -165,22 +192,6 @@ export function EventSection({
                     Unarchive
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="btn-crud btn-crud--danger"
-                  onClick={async (e) => {
-                    e.stopPropagation();
-                    if (!window.confirm("Delete this event permanently?")) return;
-                    try {
-                      await deleteData(`/events/${ev.id}`);
-                      await loadAll();
-                    } catch {
-                      setBackendOffline(true);
-                    }
-                  }}
-                >
-                  Delete
-                </button>
                 <span className={`status-pill${ev.archived ? " status-pill--muted" : ""}`}>
                   {ev.archived ? "Archived" : "Scheduled"}
                 </span>
