@@ -20,10 +20,6 @@ export function normalizeNav(o) {
   const tab = tabs.includes(legacyTab) ? legacyTab : "Dashboard";
   return {
     tab,
-    taskPage: o.taskPage === "detail" || o.taskPage === "list" ? o.taskPage : "list",
-    selectedTaskId: typeof o.selectedTaskId === "string" ? o.selectedTaskId : null,
-    obPage: o.obPage === "detail" || o.obPage === "list" ? o.obPage : "list",
-    selectedObSlipId: typeof o.selectedObSlipId === "string" ? o.selectedObSlipId : null,
     employeePage: o.employeePage === "detail" || o.employeePage === "list" ? o.employeePage : "list",
     selectedEmployeeId: typeof o.selectedEmployeeId === "string" ? o.selectedEmployeeId : null,
   };

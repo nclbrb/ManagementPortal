@@ -5,6 +5,8 @@ import { SOCKET_URL, apiUrl, AUTH_STORAGE_KEY, getAuthHeaders } from "./apiConfi
 import comelecLogo from "./assets/comelec.png";
 import { jsonFetch } from "./lib/jsonFetch.js";
 import { COMELEC_NAV_KEY, initialAppNav, normalizeNav, tabs } from "./lib/navStore.js";
+import { TASK_STATUSES, TASK_STAGES } from "./lib/taskConstants.js";
+import { buildTaskListPrintHtml } from "./tasks/buildTaskListPrintHtml.js";
 import { staffInitials } from "./lib/strings.js";
 import { buildObSlipPrintHtml } from "./obSlip/printObSlipHtml.js";
 import { tabIcons } from "./icons/tabIcons.jsx";
@@ -15,20 +17,31 @@ import { EventSection } from "./components/EventSection.jsx";
 function App() {
   const [activeTab, setActiveTab] = useState(() => initialAppNav?.tab ?? "Dashboard");
   const [dashboard, setDashboard] = useState(null);
-  const [tasksData, setTasksData] = useState({ stages: [], items: [], logs: [] });
+  const [tasksData, setTasksData] = useState({ statuses: TASK_STATUSES, stages: TASK_STAGES, items: [], logs: [] });
   const [employees, setEmployees] = useState([]);
   const [events, setEvents] = useState([]);
   const [obSlips, setObSlips] = useState([]);
   const [employeeFilter, setEmployeeFilter] = useState("all");
   const [modalType, setModalType] = useState("");
-  const [selectedTaskId, setSelectedTaskId] = useState(() => initialAppNav?.selectedTaskId ?? null);
-  const [taskPage, setTaskPage] = useState(() => initialAppNav?.taskPage ?? "list");
-  const [taskProgress, setTaskProgress] = useState({ staff: "", note: "", stage: "1" });
+  const [taskViewId, setTaskViewId] = useState(null);
+  const [taskPrintOpen, setTaskPrintOpen] = useState(false);
+  const [printTaskRange, setPrintTaskRange] = useState({
+    from: dayjs().format("YYYY-MM-DD"),
+    to: dayjs().format("YYYY-MM-DD"),
+    employeeId: "all",
+    status: "all",
+    /** "active" | "archived" | "all" — which tasks to include on the printed sheet */
+    archiveScope: "active",
+  });
+  /** '' | employee id | 'manual' — roster pick for task assignee field */
+  const [taskAssigneePick, setTaskAssigneePick] = useState("");
   const [newTask, setNewTask] = useState({
-    title: dayjs().format("YYYY-MM-DD"),
-    assignedStaff: "",
-    note: "",
-    batchDate: dayjs().format("YYYY-MM-DD"),
+    title: "",
+    dateFrom: dayjs().format("YYYY-MM-DD"),
+    dateTo: dayjs().format("YYYY-MM-DD"),
+    assignee: "",
+    notes: "",
+    status: "In Progress",
   });
   const [newEmployee, setNewEmployee] = useState({
     name: "",
@@ -56,19 +69,18 @@ function App() {
   });
   const [dashboardSearch, setDashboardSearch] = useState("");
   const [taskSearch, setTaskSearch] = useState("");
-  const [taskStageFilter, setTaskStageFilter] = useState("all");
   const [taskDateFilter, setTaskDateFilter] = useState("");
   const [taskStatusFilter, setTaskStatusFilter] = useState("all");
+  const [taskArchiveFilter, setTaskArchiveFilter] = useState("active");
   const [taskListPage, setTaskListPage] = useState(1);
-  const [taskError, setTaskError] = useState("");
   const [taskModalError, setTaskModalError] = useState("");
   const [obSearch, setObSearch] = useState("");
   const [obQuickRange, setObQuickRange] = useState("all");
   const [obPickDate, setObPickDate] = useState("");
   const [obArchiveScope, setObArchiveScope] = useState("active");
   const [obListPage, setObListPage] = useState(1);
-  const [obPage, setObPage] = useState(() => initialAppNav?.obPage ?? "list");
-  const [selectedObSlipId, setSelectedObSlipId] = useState(() => initialAppNav?.selectedObSlipId ?? null);
+  const [obSlipViewId, setObSlipViewId] = useState(null);
+  const [eventViewId, setEventViewId] = useState(null);
   const [obExportIds, setObExportIds] = useState([]);
   const obImportInputRef = useRef(null);
   const [eventSearch, setEventSearch] = useState("");
@@ -88,16 +100,11 @@ function App() {
   const [editingObId, setEditingObId] = useState(null);
   const [editingEventId, setEditingEventId] = useState(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
-  const [showFinalStepConfirm, setShowFinalStepConfirm] = useState(false);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(() => initialAppNav?.selectedEmployeeId ?? null);
   const [employeePage, setEmployeePage] = useState(() => initialAppNav?.employeePage ?? "list");
 
   const navSnapRef = useRef({
     tab: initialAppNav?.tab ?? "Dashboard",
-    taskPage: initialAppNav?.taskPage ?? "list",
-    selectedTaskId: initialAppNav?.selectedTaskId ?? null,
-    obPage: initialAppNav?.obPage ?? "list",
-    selectedObSlipId: initialAppNav?.selectedObSlipId ?? null,
     employeePage: initialAppNav?.employeePage ?? "list",
     selectedEmployeeId: initialAppNav?.selectedEmployeeId ?? null,
   });
@@ -106,14 +113,10 @@ function App() {
   useLayoutEffect(() => {
     navSnapRef.current = {
       tab: activeTab,
-      taskPage,
-      selectedTaskId,
-      obPage,
-      selectedObSlipId,
       employeePage,
       selectedEmployeeId,
     };
-  }, [activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+  }, [activeTab, employeePage, selectedEmployeeId]);
 
   const applyAndPushNav = (updates) => {
     const merged = normalizeNav({ ...navSnapRef.current, ...updates });
@@ -125,27 +128,41 @@ function App() {
       /* ignore */
     }
     setActiveTab(merged.tab);
-    setTaskPage(merged.taskPage);
-    setSelectedTaskId(merged.selectedTaskId);
-    setObPage(merged.obPage);
-    setSelectedObSlipId(merged.selectedObSlipId);
     setEmployeePage(merged.employeePage);
     setSelectedEmployeeId(merged.selectedEmployeeId);
   };
 
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 901px)");
-    const closeNav = () => setNavOpen(false);
-    mq.addEventListener("change", closeNav);
+    const mqDesktop = window.matchMedia("(min-width: 901px)");
+    const closeNavOnDesktop = () => {
+      if (mqDesktop.matches) setNavOpen(false);
+    };
+    closeNavOnDesktop();
+    mqDesktop.addEventListener("change", closeNavOnDesktop);
     const onKey = (e) => {
       if (e.key === "Escape") setNavOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => {
-      mq.removeEventListener("change", closeNav);
+      mqDesktop.removeEventListener("change", closeNavOnDesktop);
       window.removeEventListener("keydown", onKey);
     };
   }, []);
+
+  /** Lock background scroll when the drawer is open (mobile / narrow). Matches CSS breakpoint max-width: 900px. */
+  useEffect(() => {
+    const mqNarrow = window.matchMedia("(max-width: 900px)");
+    const syncBodyScrollLock = () => {
+      const lock = navOpen && mqNarrow.matches;
+      document.body.classList.toggle("nav-drawer-open", lock);
+    };
+    syncBodyScrollLock();
+    mqNarrow.addEventListener("change", syncBodyScrollLock);
+    return () => {
+      mqNarrow.removeEventListener("change", syncBodyScrollLock);
+      document.body.classList.remove("nav-drawer-open");
+    };
+  }, [navOpen]);
 
   const loadAll = async () => {
     try {
@@ -177,7 +194,7 @@ function App() {
       }
       setBackendOffline(true);
       setDashboard(null);
-      setTasksData({ stages: [], items: [], logs: [] });
+      setTasksData({ statuses: TASK_STATUSES, stages: TASK_STAGES, items: [], logs: [] });
       setEmployees([]);
       setEvents([]);
       setObSlips([]);
@@ -223,7 +240,8 @@ function App() {
       setDashboard(payload.dashboard);
       if (payload.tasks && typeof payload.tasks === "object" && Array.isArray(payload.tasks.items)) {
         setTasksData({
-          stages: Array.isArray(payload.tasks.stages) ? payload.tasks.stages : [],
+          statuses: Array.isArray(payload.tasks.statuses) ? payload.tasks.statuses : TASK_STATUSES,
+          stages: Array.isArray(payload.tasks.stages) ? payload.tasks.stages : TASK_STAGES,
           items: payload.tasks.items,
           logs: Array.isArray(payload.tasks.logs) ? payload.tasks.logs : [],
         });
@@ -240,10 +258,6 @@ function App() {
     if (!authUser || typeof authUser !== "object") return;
     const snap = normalizeNav({
       tab: activeTab,
-      taskPage,
-      selectedTaskId,
-      obPage,
-      selectedObSlipId,
       employeePage,
       selectedEmployeeId,
     });
@@ -254,7 +268,7 @@ function App() {
         /* ignore */
       }
     }
-  }, [authUser, activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+  }, [authUser, activeTab, employeePage, selectedEmployeeId]);
 
   useEffect(() => {
     if (!authUser || typeof authUser !== "object") {
@@ -266,26 +280,18 @@ function App() {
     if (!window.history.state?.comelec) {
       const snap = normalizeNav({
         tab: activeTab,
-        taskPage,
-        selectedTaskId,
-        obPage,
-        selectedObSlipId,
         employeePage,
         selectedEmployeeId,
       });
       if (snap) window.history.replaceState({ comelec: snap }, "", "");
     }
-  }, [authUser, activeTab, taskPage, selectedTaskId, obPage, selectedObSlipId, employeePage, selectedEmployeeId]);
+  }, [authUser, activeTab, employeePage, selectedEmployeeId]);
 
   useEffect(() => {
     const onPop = (e) => {
       const n = normalizeNav(e.state?.comelec);
       if (!n) return;
       setActiveTab(n.tab);
-      setTaskPage(n.taskPage);
-      setSelectedTaskId(n.selectedTaskId);
-      setObPage(n.obPage);
-      setSelectedObSlipId(n.selectedObSlipId);
       setEmployeePage(n.employeePage);
       setSelectedEmployeeId(n.selectedEmployeeId);
       try {
@@ -299,17 +305,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (activeTab === "Task Tracker" && taskPage === "detail" && selectedTaskId && tasksData.stages.length > 0) {
-      if (!tasksData.items.some((t) => t.id === selectedTaskId)) {
-        setTaskPage("list");
-        setSelectedTaskId(null);
-      }
+    if (activeTab === "OB Slip" && obSlipViewId && !obSlips.some((s) => s.id === obSlipViewId)) {
+      setObSlipViewId(null);
+      setModalType("");
     }
-    if (activeTab === "OB Slip" && obPage === "detail" && selectedObSlipId) {
-      if (obSlips.length > 0 && !obSlips.some((s) => s.id === selectedObSlipId)) {
-        setObPage("list");
-        setSelectedObSlipId(null);
-      }
+    if (activeTab === "Event" && eventViewId && !events.some((e) => e.id === eventViewId)) {
+      setEventViewId(null);
+      setModalType("");
     }
     if (activeTab === "Employees" && employeePage === "detail" && selectedEmployeeId) {
       if (employees.length > 0 && !employees.some((e) => e.id === selectedEmployeeId)) {
@@ -319,12 +321,10 @@ function App() {
     }
   }, [
     activeTab,
-    taskPage,
-    selectedTaskId,
-    tasksData.items,
-    obPage,
-    selectedObSlipId,
+    obSlipViewId,
     obSlips,
+    eventViewId,
+    events,
     employeePage,
     selectedEmployeeId,
     employees,
@@ -385,6 +385,10 @@ function App() {
   const closeModal = () => {
     setModalType("");
     setEditingTaskId(null);
+    setTaskViewId(null);
+    setObSlipViewId(null);
+    setEventViewId(null);
+    setTaskAssigneePick("");
     setEditingObId(null);
     setEditingEventId(null);
     setEditingEmployeeId(null);
@@ -409,17 +413,6 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const submitTaskAdvance = () => {
-    if (!selectedTask) return;
-    const targetStage = Number(taskProgress.stage);
-    const finalStageIndex = tasksData.stages.length - 1;
-    if (targetStage === finalStageIndex && selectedTask.currentStage < finalStageIndex) {
-      setShowFinalStepConfirm(true);
-      return;
-    }
-    advanceTask(selectedTask.id);
-  };
-
   const userDisplayName = useMemo(() => {
     if (!authUser || typeof authUser !== "object") return "User";
     const mail = String(authUser.email || "").trim().toLowerCase();
@@ -433,6 +426,32 @@ function App() {
     () => [...employees].sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" })),
     [employees]
   );
+
+  const resolveTaskAssigneePick = (assignee) => {
+    const a = String(assignee || "").trim().toLowerCase();
+    if (!a) return "";
+    const match = employeesSorted.find((e) => String(e.name || "").trim().toLowerCase() === a);
+    return match ? match.id : "manual";
+  };
+
+  const advanceTaskStage = async (taskId) => {
+    if (!taskId) return;
+    try {
+      const task = tasksData.items.find((t) => t.id === taskId);
+      if (!task) return;
+      const currentStage = Number(task.currentStage ?? 0);
+      const nextStage = Math.min(currentStage + 1, TASK_STAGES.length - 1);
+      await patchData(`/tasks/${taskId}/stage`, {
+        stage: nextStage,
+        assignedStaff: task.assignee || "",
+        note: `Stage advanced to ${TASK_STAGES[nextStage]}`,
+      });
+      await loadAll();
+      setBackendOffline(false);
+    } catch {
+      setBackendOffline(true);
+    }
+  };
 
   const filteredEmployees = useMemo(
     () => {
@@ -457,54 +476,40 @@ function App() {
     [employees, selectedEmployeeId]
   );
 
-  const selectedTask = useMemo(
-    () => tasksData.items.find((task) => task.id === selectedTaskId) || null,
-    [tasksData.items, selectedTaskId]
+  const viewingTask = useMemo(
+    () => (taskViewId ? tasksData.items.find((task) => task.id === taskViewId) || null : null),
+    [tasksData.items, taskViewId]
   );
 
-  const selectedObSlip = useMemo(
-    () => obSlips.find((s) => s.id === selectedObSlipId) || null,
-    [obSlips, selectedObSlipId]
-  );
+  const viewingObSlip = useMemo(() => obSlips.find((s) => s.id === obSlipViewId) || null, [obSlips, obSlipViewId]);
 
-  const selectedTaskProgressPct = useMemo(() => {
-    if (!selectedTask || !tasksData.stages.length) return 0;
-    return Math.round(((selectedTask.currentStage + 1) / tasksData.stages.length) * 100);
-  }, [selectedTask, tasksData.stages.length]);
-
-  const selectedTaskUpdates = useMemo(() => {
-    if (!selectedTask?.updates) return [];
-    return [...selectedTask.updates].sort((a, b) => new Date(b.at) - new Date(a.at));
-  }, [selectedTask]);
+  const viewingEvent = useMemo(() => events.find((e) => e.id === eventViewId) || null, [events, eventViewId]);
 
   const filteredTasks = useMemo(() => {
     const filtered = tasksData.items.filter((task) => {
-      const textPass = `${task.title} ${task.batchDate}`.toLowerCase().includes(taskSearch.toLowerCase());
-      const stagePass = taskStageFilter === "all" || String(task.currentStage) === taskStageFilter;
-      const datePass = !taskDateFilter || task.batchDate === taskDateFilter;
-      const status =
-        task.currentStage === tasksData.stages.length - 1
-          ? "completed"
-          : task.currentStage === 0
-          ? "pending"
-          : "in-progress";
-      const statusPass = taskStatusFilter === "all" || taskStatusFilter === status;
-      return textPass && stagePass && datePass && statusPass;
+      const textPass = `${task.title} ${task.dateFrom || ""} ${task.dateTo || ""} ${task.assignee || ""} ${task.notes || ""}`
+        .toLowerCase()
+        .includes(taskSearch.toLowerCase());
+      let archivePass = true;
+      if (taskArchiveFilter === "active") archivePass = !task.archived;
+      else if (taskArchiveFilter === "archived") archivePass = !!task.archived;
+      const datePass =
+        !taskDateFilter ||
+        (String(task.dateFrom || "") <= taskDateFilter && String(task.dateTo || "") >= taskDateFilter);
+      const statusPass = taskStatusFilter === "all" || task.status === taskStatusFilter;
+      return textPass && archivePass && datePass && statusPass;
     });
-    return [...filtered].sort((a, b) => {
-      const aKey = `${a.batchDate || ""}T${a.updatedAt || a.createdAt || ""}`;
-      const bKey = `${b.batchDate || ""}T${b.updatedAt || b.createdAt || ""}`;
-      return bKey.localeCompare(aKey);
-    });
-  }, [tasksData.items, taskSearch, taskStageFilter, taskDateFilter, taskStatusFilter, tasksData.stages.length]);
+    return [...filtered].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  }, [tasksData.items, taskSearch, taskDateFilter, taskStatusFilter, taskArchiveFilter]);
 
   const taskSummary = useMemo(() => {
-    const total = tasksData.items.length;
-    const completed = tasksData.items.filter((t) => t.currentStage === tasksData.stages.length - 1).length;
-    const pending = tasksData.items.filter((t) => t.currentStage === 0).length;
-    const inProgress = Math.max(total - completed - pending, 0);
+    const active = tasksData.items.filter((t) => !t.archived);
+    const total = active.length;
+    const completed = active.filter((t) => t.status === "Completed").length;
+    const inProgress = active.filter((t) => t.status === "In Progress").length;
+    const pending = active.filter((t) => t.status === "On Hold" || t.status === "Cancelled").length;
     return { total, pending, inProgress, completed };
-  }, [tasksData.items, tasksData.stages.length]);
+  }, [tasksData.items]);
 
   const filteredObSlips = useMemo(() => {
     const today = dayjs().format("YYYY-MM-DD");
@@ -586,7 +591,7 @@ function App() {
 
   useEffect(() => {
     setTaskListPage(1);
-  }, [taskSearch, taskStageFilter, taskDateFilter, taskStatusFilter, tasksData.items.length]);
+  }, [taskSearch, taskDateFilter, taskStatusFilter, taskArchiveFilter, tasksData.items.length]);
 
   useEffect(() => {
     if (taskListPage > taskListPages) setTaskListPage(taskListPages);
@@ -643,46 +648,92 @@ function App() {
     return tasks.filter((t) => t.title.toLowerCase().includes(dashboardSearch.toLowerCase()));
   }, [dashboard, dashboardSearch]);
 
-  const advanceTask = async (taskId) => {
-    try {
-      const response = await fetch(apiUrl(`/tasks/${taskId}/stage`), {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({
-          stage: Number(taskProgress.stage),
-          assignedStaff: taskProgress.staff || "Assigned Staff",
-          note: taskProgress.note,
-        }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setTaskError(payload.error || "Unable to update task.");
-        return;
-      }
-      setTaskError("");
-      if (payload?.id) {
-        setTasksData((prev) => ({
-          ...prev,
-          items: prev.items.map((t) => (t.id === payload.id ? payload : t)),
-        }));
-      }
-      const nextStage = Math.min((payload?.currentStage ?? 0) + 1, Math.max((tasksData.stages?.length || 1) - 1, 0));
-      setTaskProgress({ staff: "", note: "", stage: String(nextStage) });
-      setBackendOffline(false);
-    } catch {
-      setBackendOffline(true);
-      setTaskError("Cannot reach backend. Start the API server and try again.");
+  const printTaskListSheet = () => {
+    const { from, to, employeeId, status: printStatus, archiveScope } = printTaskRange;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      window.alert("Please enter valid dates (YYYY-MM-DD).");
+      return;
     }
+    if (from > to) {
+      window.alert("Start date cannot be after end date.");
+      return;
+    }
+    const emp = employeeId === "all" ? null : employeesSorted.find((e) => e.id === employeeId);
+    const byEmployee = (t) => {
+      if (!emp) return true;
+      return String(t.assignee || "").trim().toLowerCase() === String(emp.name || "").trim().toLowerCase();
+    };
+    const byStatus = (t) => {
+      if (printStatus === "all") return true;
+      return (t.status || "In Progress") === printStatus;
+    };
+    const byArchive = (t) => {
+      if (archiveScope === "active") return !t.archived;
+      if (archiveScope === "archived") return !!t.archived;
+      return true;
+    };
+    const archiveLabel =
+      archiveScope === "active" ? "Active only" : archiveScope === "archived" ? "Archived only" : "Active + archived";
+    const overlapsRange = (t) => String(t.dateFrom || "") <= to && String(t.dateTo || "") >= from;
+    const rows = tasksData.items
+      .filter((t) => byArchive(t) && byEmployee(t) && byStatus(t))
+      .filter(overlapsRange)
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+      .map((t) => ({
+        dateRange: `${t.dateFrom || "—"} - ${t.dateTo || "—"}`,
+        task: t.title,
+        assigned: t.assignee || "—",
+        status: t.status || "In Progress",
+        notes: t.notes || "",
+      }));
+    const logoUrl =
+      typeof comelecLogo === "string" && (comelecLogo.startsWith("http://") || comelecLogo.startsWith("https://"))
+        ? comelecLogo
+        : comelecLogo.startsWith("data:")
+        ? comelecLogo
+        : new URL(comelecLogo, window.location.origin).href;
+    const filterItems = [
+      { label: "Date range", value: `${from} - ${to}` },
+      { label: "Employee", value: employeeId === "all" ? "All" : emp?.name || "—" },
+      { label: "Status", value: printStatus === "all" ? "All" : printStatus },
+      { label: "Archive", value: archiveLabel },
+    ];
+    const win = window.open("", "_blank", "width=1100,height=800");
+    if (!win) return;
+    win.document.write(
+      buildTaskListPrintHtml({
+        title: "Employee Task List",
+        logoUrl,
+        filterItems,
+        rows,
+      })
+    );
+    win.document.close();
+    win.focus();
+    win.addEventListener(
+      "load",
+      () => {
+        const imgs = Array.from(win.document.images || []);
+        if (imgs.length === 0) {
+          win.print();
+          return;
+        }
+        let pending = imgs.length;
+        const kick = () => {
+          pending -= 1;
+          if (pending <= 0) win.print();
+        };
+        imgs.forEach((img) => {
+          if (img.complete && img.naturalWidth > 0) kick();
+          else {
+            img.addEventListener("load", kick, { once: true });
+            img.addEventListener("error", kick, { once: true });
+          }
+        });
+      },
+      { once: true }
+    );
   };
-
-  useEffect(() => {
-    if (!selectedTask || taskPage !== "detail") return;
-    const nextStage = Math.min(selectedTask.currentStage + 1, Math.max(tasksData.stages.length - 1, 0));
-    setTaskProgress((prev) => ({
-      ...prev,
-      stage: String(nextStage),
-    }));
-  }, [selectedTask?.id, selectedTask?.currentStage, taskPage, tasksData.stages.length]);
 
   const importSlipExcel = async (file) => {
     try {
@@ -792,14 +843,6 @@ function App() {
       updates.employeePage = "list";
       updates.selectedEmployeeId = null;
     }
-    if (tab !== "OB Slip") {
-      updates.obPage = "list";
-      updates.selectedObSlipId = null;
-    }
-    if (tab === "Task Tracker") {
-      updates.taskPage = "list";
-      updates.selectedTaskId = null;
-    }
     applyAndPushNav(updates);
   };
 
@@ -879,6 +922,7 @@ function App() {
         className="nav-toggle"
         aria-label={navOpen ? "Close menu" : "Open menu"}
         aria-expanded={navOpen}
+        tabIndex={navOpen ? -1 : 0}
         onClick={() => setNavOpen((o) => !o)}
       >
         <span className="nav-toggle-bar" />
@@ -886,7 +930,9 @@ function App() {
         <span className="nav-toggle-bar" />
       </button>
 
-      {navOpen && <div className="nav-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      {navOpen && (
+        <div className="nav-backdrop" role="presentation" onClick={() => setNavOpen(false)} aria-hidden="true" />
+      )}
 
       <aside className="sidebar" id="app-sidebar">
         <div className="brand">
@@ -956,9 +1002,6 @@ function App() {
             events={events.filter((e) => !e.archived)}
             holidays={holidays}
             employees={employees}
-            taskLogs={tasksData.logs || []}
-            taskItems={tasksData.items || []}
-            taskStages={tasksData.stages || []}
             userDisplayName={userDisplayName}
             onNavigate={selectTab}
           />
@@ -966,326 +1009,228 @@ function App() {
 
         {activeTab === "Task Tracker" && (
           <section className="tracker-layout single">
-            {taskPage === "list" && (
-              <div className="task-tracker-page task-tracker-page--stacked">
-                <header className="task-tracker-intro">
-                  <span className="task-tracker-eyebrow">Workflow</span>
-                  <h2 className="task-tracker-title">Task Tracker</h2>
-                  <p className="task-tracker-lede">
-                    Monitor batch movement across each workflow step. Open a batch to advance it sequentially.
-                  </p>
-                </header>
+            <div className="task-tracker-page task-tracker-page--stacked">
+              <header className="task-tracker-intro">
+                <span className="task-tracker-eyebrow">Workflow</span>
+                <h2 className="task-tracker-title">Task Tracker</h2>
+                <p className="task-tracker-lede">Create tasks, assign staff, and track status from the list.</p>
+              </header>
 
-                <div className="tracker-summary tracker-summary--row">
-                  <article className="tracker-kpi">
-                    <small>Total Batches</small>
-                    <strong>{taskSummary.total}</strong>
-                  </article>
-                  <article className="tracker-kpi">
-                    <small>Pending</small>
-                    <strong>{taskSummary.pending}</strong>
-                  </article>
-                  <article className="tracker-kpi">
-                    <small>In Progress</small>
-                    <strong>{taskSummary.inProgress}</strong>
-                  </article>
-                  <article className="tracker-kpi">
-                    <small>Completed</small>
-                    <strong>{taskSummary.completed}</strong>
-                  </article>
-                </div>
-
-                <div className="task-tracker-filters-card">
-                  <div className="task-tracker-filters-label">Filter &amp; search</div>
-                  <div className="task-tracker-toolbar cal-app-toolbar">
-                    <div className="inline-form task-tracker-filters">
-                      <input placeholder="Search by title or date…" value={taskSearch} onChange={(e) => setTaskSearch(e.target.value)} />
-                      <input type="date" value={taskDateFilter} onChange={(e) => setTaskDateFilter(e.target.value)} />
-                      <select value={taskStatusFilter} onChange={(e) => setTaskStatusFilter(e.target.value)}>
-                        <option value="all">All Statuses</option>
-                        <option value="pending">Pending</option>
-                        <option value="in-progress">In Progress</option>
-                        <option value="completed">Completed</option>
-                      </select>
-                      <select value={taskStageFilter} onChange={(e) => setTaskStageFilter(e.target.value)}>
-                        <option value="all">All Stages</option>
-                        {tasksData.stages.map((s, i) => (
-                          <option key={s} value={String(i)}>{`${i}. ${s}`}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      type="button"
-                      className="task-tracker-add"
-                      onClick={() => {
-                        setEditingTaskId(null);
-                        setNewTask({
-                          title: dayjs().format("YYYY-MM-DD"),
-                          assignedStaff: "",
-                          note: "",
-                          batchDate: dayjs().format("YYYY-MM-DD"),
-                        });
-                        setTaskModalError("");
-                        setModalType("task");
-                      }}
-                    >
-                      + Add batch
-                    </button>
-                  </div>
-                </div>
-
-                <article className="task-tracker-list-card">
-                  <div className="task-tracker-list-heading">
-                    <div>
-                      <h3 className="task-tracker-list-title">Task list</h3>
-                      <p className="task-tracker-list-sub">
-                        {filteredTasks.length} batch{filteredTasks.length === 1 ? "" : "es"} match your filters
-                      </p>
-                    </div>
-                  </div>
-                  <div className="task-list task-list-scroll task-list-scroll--roomy">
-                    {filteredTasks.length === 0 ? (
-                      <div className="task-empty">No tasks match your current filters.</div>
-                    ) : (
-                      pagedTasks.map((task) => {
-                        const progressPct = Math.round(((task.currentStage + 1) / tasksData.stages.length) * 100);
-                        const status =
-                          task.currentStage === tasksData.stages.length - 1
-                            ? "Completed"
-                            : task.currentStage === 0
-                            ? "Pending"
-                            : "In Progress";
-                        const isCompleted = task.currentStage === tasksData.stages.length - 1;
-                        const openTaskDetail = () => {
-                          setTaskError("");
-                          const nextStage = Math.min(task.currentStage + 1, tasksData.stages.length - 1);
-                          setTaskProgress({ staff: "", note: "", stage: String(nextStage) });
-                          applyAndPushNav({ taskPage: "detail", selectedTaskId: task.id });
-                        };
-                        return (
-                          <div
-                            className="task-item list-item task-list-item"
-                            role="button"
-                            tabIndex={0}
-                            key={task.id}
-                            onClick={openTaskDetail}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                openTaskDetail();
-                              }
-                            }}
-                          >
-                            <div className="list-main">
-                              <strong>{task.title}</strong>
-                              <small>{`Batch date: ${task.batchDate}`}</small>
-                              <div className={`task-progress-bar${isCompleted ? " task-progress-bar--complete" : ""}`}>
-                                <span style={{ width: `${progressPct}%` }} />
-                              </div>
-                            </div>
-                            <div className="list-meta list-meta--crud" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                className="btn-crud"
-                                onClick={() => {
-                                  setEditingTaskId(task.id);
-                                  setNewTask({
-                                    title: task.title,
-                                    batchDate: task.batchDate,
-                                    assignedStaff: "",
-                                    note: "",
-                                  });
-                                  setTaskModalError("");
-                                  setModalType("task");
-                                }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="btn-crud btn-crud--danger"
-                                onClick={async () => {
-                                  if (!window.confirm("Delete this batch permanently?")) return;
-                                  try {
-                                    await deleteData(`/tasks/${task.id}`);
-                                    if (selectedTaskId === task.id) {
-                                      applyAndPushNav({ taskPage: "list", selectedTaskId: null });
-                                    }
-                                    await loadAll();
-                                  } catch {
-                                    setBackendOffline(true);
-                                  }
-                                }}
-                              >
-                                Delete
-                              </button>
-                              <span className="status-pill">{status}</span>
-                              <small>{`${progressPct}%`}</small>
-                              <span className="list-arrow">›</span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                  {filteredTasks.length > LIST_PAGE_SIZE && (
-                    <div className="list-pagination" aria-label="Task list pages">
-                      {Array.from({ length: taskListPages }, (_, i) => i + 1).map((p) => (
-                        <button
-                          key={`task-page-${p}`}
-                          type="button"
-                          className={`list-page-btn ${p === taskPageSafe ? "is-active" : ""}`}
-                          onClick={() => setTaskListPage(p)}
-                        >
-                          {p}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+              <div className="tracker-summary tracker-summary--row">
+                <article className="tracker-kpi">
+                  <small>Total tasks</small>
+                  <strong>{taskSummary.total}</strong>
+                </article>
+                <article className="tracker-kpi">
+                  <small>On hold / cancelled</small>
+                  <strong>{taskSummary.pending}</strong>
+                </article>
+                <article className="tracker-kpi">
+                  <small>In progress</small>
+                  <strong>{taskSummary.inProgress}</strong>
+                </article>
+                <article className="tracker-kpi">
+                  <small>Completed</small>
+                  <strong>{taskSummary.completed}</strong>
                 </article>
               </div>
-            )}
 
-            {taskPage === "detail" && selectedTask && (
-              <article className="panel">
-                <div className="panel-head panel-head--task-detail">
-                  <h3>{selectedTask.title}</h3>
-                  <div className="panel-head-actions">
-                    <button
-                      type="button"
-                      className="btn-crud btn-crud--danger"
-                      onClick={async () => {
-                        if (!window.confirm("Delete this batch permanently?")) return;
-                        try {
-                          const id = selectedTask.id;
-                          await deleteData(`/tasks/${id}`);
-                          applyAndPushNav({ taskPage: "list", selectedTaskId: null });
-                          await loadAll();
-                        } catch {
-                          setBackendOffline(true);
-                        }
-                      }}
-                    >
-                      Delete batch
-                    </button>
-                    <button type="button" onClick={() => applyAndPushNav({ taskPage: "list", selectedTaskId: null })}>
-                      Back to Task List
-                    </button>
-                  </div>
-                </div>
-                <div className="batch-details-card">
-                  <div className="batch-details-head">
-                    <h4>Batch details</h4>
-                    <span className="status-pill">{`${selectedTaskProgressPct}% complete`}</span>
-                  </div>
-                  <div className="batch-details-grid">
-                    <div>
-                      <small>Batch date</small>
-                      <strong>{selectedTask.batchDate}</strong>
-                    </div>
-                    <div>
-                      <small>Current stage</small>
-                      <strong>{tasksData.stages[selectedTask.currentStage] || "N/A"}</strong>
-                    </div>
-                    <div>
-                      <small>Step position</small>
-                      <strong>{`${selectedTask.currentStage + 1} of ${tasksData.stages.length}`}</strong>
-                    </div>
-                    <div>
-                      <small>Last update</small>
-                      <strong>{selectedTaskUpdates[0] ? dayjs(selectedTaskUpdates[0].at).format("MMM D, YYYY h:mm A") : "N/A"}</strong>
-                    </div>
-                  </div>
-                </div>
-                <div className="timeline horizontal-shipping">
-                  {tasksData.stages.map((stage, index) => {
-                    const state =
-                      index < selectedTask.currentStage ? "done" : index === selectedTask.currentStage ? "current" : "pending";
-                    return (
-                      <div className={`shipping-step-h ${state}`} key={`${selectedTask.id}-${stage}`}>
-                        <span className="shipping-bullet">{index + 1}</span>
-                        <div className="shipping-content">
-                          <p className="shipping-title">{stage}</p>
-                          <small>{state === "done" ? "Completed" : state === "current" ? "In Progress" : "Waiting"}</small>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <form
-                  className="inline-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    submitTaskAdvance();
-                  }}
-                >
-                  <select
-                    value={selectedTask.currentStage >= tasksData.stages.length - 1 ? "" : String(taskProgress.stage)}
-                    onChange={(e) => setTaskProgress({ ...taskProgress, stage: e.target.value })}
-                  >
-                    {tasksData.stages
-                      .map((s, i) => ({ label: s, index: i }))
-                      .filter(({ index }) => index === selectedTask.currentStage + 1 || (selectedTask.currentStage === 2 && index === 1))
-                      .map(({ label, index }) => (
-                        <option value={String(index)} key={label}>{`${index + 1}. ${label}`}</option>
+              <div className="task-tracker-filters-card">
+                <div className="task-tracker-filters-label">Filter &amp; search</div>
+                <div className="task-tracker-toolbar cal-app-toolbar">
+                  <div className="inline-form task-tracker-filters">
+                    <input
+                      placeholder="Search title, dates, assignee, notes…"
+                      value={taskSearch}
+                      onChange={(e) => setTaskSearch(e.target.value)}
+                    />
+                    <input type="date" value={taskDateFilter} onChange={(e) => setTaskDateFilter(e.target.value)} />
+                    <select value={taskStatusFilter} className="mp-select" onChange={(e) => setTaskStatusFilter(e.target.value)}>
+                      <option value="all">All statuses</option>
+                      {TASK_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
                       ))}
-                    {selectedTask.currentStage >= tasksData.stages.length - 1 && <option value="">Final stage reached</option>}
-                  </select>
-                  <select
-                    value={taskProgress.staff}
-                    onChange={(e) => setTaskProgress({ ...taskProgress, staff: e.target.value })}
-                    required
-                    aria-label="Assigned employee"
-                  >
-                    <option value="">Select employee</option>
-                    {employeesSorted.map((emp) => (
-                      <option key={emp.id} value={emp.name}>
-                        {emp.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input placeholder="Note (optional)" value={taskProgress.note} onChange={(e) => setTaskProgress({ ...taskProgress, note: e.target.value })} />
-                  <button
-                    className={`apply-step-btn ${selectedTask.currentStage >= tasksData.stages.length - 1 ? "apply-step-btn--done" : ""}`}
-                    disabled={selectedTask.currentStage >= tasksData.stages.length - 1}
-                  >
-                    {selectedTask.currentStage >= tasksData.stages.length - 1 ? "Batch Completed" : "Apply Sequential Update"}
+                    </select>
+                    <select value={taskArchiveFilter} className="mp-select" onChange={(e) => setTaskArchiveFilter(e.target.value)}>
+                      <option value="active">Active only</option>
+                      <option value="archived">Archived only</option>
+                      <option value="all">Active + archived</option>
+                    </select>
+                  </div>
+                  <button type="button" className="task-tracker-add" onClick={() => setTaskPrintOpen(true)}>
+                    Print
                   </button>
-                  {taskError && <small className="form-error">{taskError}</small>}
-                </form>
-                <section className="batch-logs">
-                  <h4>Batch logs</h4>
-                  {selectedTaskUpdates.length === 0 ? (
-                    <p className="modal-hint">No log entries yet.</p>
+                  <button
+                    type="button"
+                    className="task-tracker-add"
+                    onClick={() => {
+                      setEditingTaskId(null);
+                      setTaskAssigneePick("");
+                      setNewTask({
+                        title: "",
+                        dateFrom: dayjs().format("YYYY-MM-DD"),
+                        dateTo: dayjs().format("YYYY-MM-DD"),
+                        assignee: "",
+                        notes: "",
+                        status: "In Progress",
+                      });
+                      setTaskModalError("");
+                      setModalType("task");
+                    }}
+                  >
+                    + Add Task
+                  </button>
+                </div>
+              </div>
+
+              <article className="task-tracker-list-card">
+                <div className="task-tracker-list-heading">
+                  <div>
+                    <h3 className="task-tracker-list-title">Task list</h3>
+                    <p className="task-tracker-list-sub">
+                      {filteredTasks.length} task{filteredTasks.length === 1 ? "" : "s"} match your filters
+                    </p>
+                  </div>
+                </div>
+                <div className="task-list task-list-scroll task-list-scroll--roomy">
+                  {filteredTasks.length === 0 ? (
+                    <div className="task-empty">No tasks match your current filters.</div>
                   ) : (
-                    <div className="batch-logs-list">
-                      {selectedTaskUpdates.map((u) => (
-                        <article className="batch-log-item" key={`${selectedTask.id}-${u.at}-${u.stage}`}>
-                          <div className="batch-log-head">
-                            <strong>{tasksData.stages[u.stage] || `Stage ${u.stage}`}</strong>
-                            <small>{dayjs(u.at).format("MMM D, YYYY h:mm A")}</small>
+                    pagedTasks.map((task) => {
+                      const openTaskView = () => {
+                        setTaskViewId(task.id);
+                        setModalType("taskView");
+                      };
+                      return (
+                        <div
+                          className="task-item list-item task-list-item"
+                          role="button"
+                          tabIndex={0}
+                          key={task.id}
+                          onClick={openTaskView}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openTaskView();
+                            }
+                          }}
+                        >
+                          <div className="list-main">
+                            <strong>{task.title}</strong>
+                            <small>{`${task.dateFrom || "—"} → ${task.dateTo || "—"}`}</small>
+                            {task.archived ? <span className="status-pill status-pill--muted">Archived</span> : null}
                           </div>
-                          <p>{u.note || "No note provided."}</p>
-                          <small>{`Assigned: ${u.assignedStaff || "Assigned Staff"}`}</small>
-                        </article>
-                      ))}
-                    </div>
+                          <div className="list-meta list-meta--crud" onClick={(e) => e.stopPropagation()}>
+                            <select
+                              className="mp-select task-styled-select"
+                              aria-label="Task status"
+                              value={task.status || "In Progress"}
+                              onChange={async (e) => {
+                                const next = e.target.value;
+                                try {
+                                  await patchData(`/tasks/${task.id}`, { status: next });
+                                  await loadAll();
+                                } catch {
+                                  setBackendOffline(true);
+                                }
+                              }}
+                            >
+                              {TASK_STATUSES.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn-crud"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingTaskId(task.id);
+                                setTaskAssigneePick(resolveTaskAssigneePick(task.assignee));
+                                setNewTask({
+                                  title: task.title,
+                                  dateFrom: task.dateFrom,
+                                  dateTo: task.dateTo,
+                                  assignee: task.assignee || "",
+                                  notes: task.notes || "",
+                                  status: task.status || "In Progress",
+                                });
+                                setTaskModalError("");
+                                setModalType("task");
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-crud btn-crud--danger"
+                              onClick={async () => {
+                                if (!window.confirm("Delete this task permanently?")) return;
+                                try {
+                                  await deleteData(`/tasks/${task.id}`);
+                                  if (taskViewId === task.id) {
+                                    setTaskViewId(null);
+                                    setModalType("");
+                                  }
+                                  await loadAll();
+                                } catch {
+                                  setBackendOffline(true);
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-crud"
+                              onClick={async () => {
+                                try {
+                                  await patchData(`/tasks/${task.id}`, { archived: !task.archived });
+                                  await loadAll();
+                                } catch {
+                                  setBackendOffline(true);
+                                }
+                              }}
+                            >
+                              {task.archived ? "Unarchive" : "Archive"}
+                            </button>
+                            <span className="list-arrow">›</span>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
-                </section>
+                </div>
+                {filteredTasks.length > LIST_PAGE_SIZE && (
+                  <div className="list-pagination" aria-label="Task list pages">
+                    {Array.from({ length: taskListPages }, (_, i) => i + 1).map((p) => (
+                      <button
+                        key={`task-page-${p}`}
+                        type="button"
+                        className={`list-page-btn ${p === taskPageSafe ? "is-active" : ""}`}
+                        onClick={() => setTaskListPage(p)}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </article>
-            )}
+            </div>
           </section>
         )}
 
         {activeTab === "OB Slip" && (
           <section className="tracker-layout single">
-            {obPage === "list" && (
-              <div className="task-tracker-page task-tracker-page--stacked">
-                <header className="task-tracker-intro">
-                  <span className="task-tracker-eyebrow">Documents</span>
-                  <h2 className="task-tracker-title">Official Business Slips</h2>
-                  <p className="task-tracker-lede">Click a slip for full details, print, archive, or edit.</p>
-                </header>
+            <div className="task-tracker-page task-tracker-page--stacked">
+              <header className="task-tracker-intro">
+                <span className="task-tracker-eyebrow">Documents</span>
+                <h2 className="task-tracker-title">Official Business Slips</h2>
+                <p className="task-tracker-lede">Click a slip for details in a modal, or use row actions to print, edit, archive, or delete.</p>
+              </header>
 
                 <div className="tracker-summary tracker-summary--row">
                   <article className="tracker-kpi">
@@ -1335,6 +1280,7 @@ function App() {
                         ) : null}
                       </div>
                       <select
+                        className="mp-select"
                         value={obQuickRange}
                         onChange={(e) => setObQuickRange(e.target.value)}
                         disabled={!!obPickDate}
@@ -1346,7 +1292,12 @@ function App() {
                         <option value="week">This week</option>
                         <option value="month">This month</option>
                       </select>
-                      <select value={obArchiveScope} onChange={(e) => setObArchiveScope(e.target.value)} aria-label="Archive filter">
+                      <select
+                        className="mp-select"
+                        value={obArchiveScope}
+                        onChange={(e) => setObArchiveScope(e.target.value)}
+                        aria-label="Archive filter"
+                      >
                         <option value="active">Active only</option>
                         <option value="archived">Archived only</option>
                         <option value="all">Active + archived</option>
@@ -1411,8 +1362,9 @@ function App() {
                       <div className="task-empty">No slips match your filters.</div>
                     ) : (
                       pagedObSlips.map((s) => {
-                        const openDetail = () => {
-                          applyAndPushNav({ obPage: "detail", selectedObSlipId: s.id });
+                        const openObView = () => {
+                          setObSlipViewId(s.id);
+                          setModalType("obSlipView");
                         };
                         return (
                           <div
@@ -1420,11 +1372,11 @@ function App() {
                             className={`task-item list-item task-list-item ob-slip-row${s.archived ? " ob-slip-row--archived" : ""}`}
                             role="button"
                             tabIndex={0}
-                            onClick={openDetail}
+                            onClick={openObView}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
-                                openDetail();
+                                openObView();
                               }
                             }}
                           >
@@ -1466,14 +1418,25 @@ function App() {
                               </button>
                               <button
                                 type="button"
+                                className="btn-crud"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  printSlip(s);
+                                }}
+                              >
+                                Print
+                              </button>
+                              <button
+                                type="button"
                                 className="btn-crud btn-crud--danger"
                                 onClick={async () => {
                                   if (!window.confirm("Delete this OB slip permanently?")) return;
                                   try {
                                     await deleteData(`/ob-slips/${s.id}`);
                                     setObExportIds((p) => p.filter((x) => x !== s.id));
-                                    if (selectedObSlipId === s.id) {
-                                      applyAndPushNav({ obPage: "list", selectedObSlipId: null });
+                                    if (obSlipViewId === s.id) {
+                                      setObSlipViewId(null);
+                                      setModalType("");
                                     }
                                     await loadAll();
                                   } catch {
@@ -1482,6 +1445,21 @@ function App() {
                                 }}
                               >
                                 Delete
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-crud"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    await patchData(`/ob-slips/${s.id}`, { archived: !s.archived });
+                                    await loadAll();
+                                  } catch {
+                                    setBackendOffline(true);
+                                  }
+                                }}
+                              >
+                                {s.archived ? "Unarchive" : "Archive"}
                               </button>
                               {s.archived ? (
                                 <span className="status-pill status-pill--muted">Archived</span>
@@ -1510,137 +1488,7 @@ function App() {
                     </div>
                   )}
                 </article>
-              </div>
-            )}
-
-            {obPage === "detail" && selectedObSlip && (
-              <article className="panel ob-slip-detail-panel">
-                <div className="ob-slip-info-hero">
-                  <div className="ob-slip-info-hero-text">
-                    <p className="ob-slip-info-eyebrow">Official Business Slip</p>
-                    <h3 className="ob-slip-info-name">{selectedObSlip.name}</h3>
-                    <p className="ob-slip-info-sub">{selectedObSlip.position}</p>
-                    <div className="ob-slip-info-chips">
-                      <span className="ob-slip-info-chip">{selectedObSlip.department || "COMELEC"}</span>
-                      <span className="ob-slip-info-chip ob-slip-info-chip--date">{selectedObSlip.date}</span>
-                      <span
-                        className={`status-pill${selectedObSlip.archived ? " status-pill--muted" : ""}`}
-                        title={selectedObSlip.archived ? "Archived slip" : "Active slip"}
-                      >
-                        {selectedObSlip.archived ? "Archived" : "Active"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="panel-head-actions ob-slip-info-hero-actions">
-                    <button type="button" className="btn-crud" onClick={() => printSlip(selectedObSlip)}>
-                      Print
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-crud"
-                      onClick={() => {
-                        setEditingObId(selectedObSlip.id);
-                        setNewSlip({
-                          date: selectedObSlip.date,
-                          name: selectedObSlip.name,
-                          position: selectedObSlip.position,
-                          department: selectedObSlip.department || "COMELEC",
-                          purpose: selectedObSlip.purpose,
-                          timeIn: selectedObSlip.timeIn,
-                          timeOut: selectedObSlip.timeOut,
-                          employeeId: selectedObSlip.employeeId || "",
-                        });
-                        setModalType("ob");
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-crud"
-                      onClick={async () => {
-                        try {
-                          await patchData(`/ob-slips/${selectedObSlip.id}`, { archived: !selectedObSlip.archived });
-                          await loadAll();
-                        } catch {
-                          setBackendOffline(true);
-                        }
-                      }}
-                    >
-                      {selectedObSlip.archived ? "Restore" : "Archive"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-crud btn-crud--danger"
-                      onClick={async () => {
-                        if (!window.confirm("Delete this OB slip permanently?")) return;
-                        try {
-                          await deleteData(`/ob-slips/${selectedObSlip.id}`);
-                          setObExportIds((p) => p.filter((x) => x !== selectedObSlip.id));
-                          applyAndPushNav({ obPage: "list", selectedObSlipId: null });
-                          await loadAll();
-                        } catch {
-                          setBackendOffline(true);
-                        }
-                      }}
-                    >
-                      Delete
-                    </button>
-                    <button type="button" onClick={() => applyAndPushNav({ obPage: "list", selectedObSlipId: null })}>
-                      Back to slip queue
-                    </button>
-                  </div>
-                </div>
-
-                <div className="ob-slip-info-layout">
-                  <section className="ob-slip-info-card">
-                    <h4 className="ob-slip-info-card-title">Schedule</h4>
-                    <dl className="ob-slip-info-dl">
-                      <div>
-                        <dt>Time in</dt>
-                        <dd>{selectedObSlip.timeIn}</dd>
-                      </div>
-                      <div>
-                        <dt>Time out</dt>
-                        <dd>{selectedObSlip.timeOut}</dd>
-                      </div>
-                      {selectedObSlip.createdAt ? (
-                        <div className="ob-slip-info-dl-span">
-                          <dt>Recorded in system</dt>
-                          <dd>{dayjs(selectedObSlip.createdAt).format("MMM D, YYYY h:mm A")}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                  </section>
-                  <section className="ob-slip-info-card">
-                    <h4 className="ob-slip-info-card-title">Record</h4>
-                    <dl className="ob-slip-info-dl">
-                      <div className="ob-slip-info-dl-span">
-                        <dt>Employee / staff ID</dt>
-                        <dd>{selectedObSlip.employeeId?.trim() || "—"}</dd>
-                      </div>
-                      <div className="ob-slip-info-dl-span">
-                        <dt>Slip ID</dt>
-                        <dd className="ob-slip-info-mono">{selectedObSlip.id}</dd>
-                      </div>
-                    </dl>
-                  </section>
-                  <section className="ob-slip-info-card ob-slip-info-card--purpose">
-                    <h4 className="ob-slip-info-card-title">Purpose of travel / business</h4>
-                    <p className="ob-slip-info-purpose">{selectedObSlip.purpose}</p>
-                  </section>
-                </div>
-              </article>
-            )}
-
-            {obPage === "detail" && !selectedObSlip && (
-              <article className="panel">
-                <p className="modal-hint">This slip is no longer in the list.</p>
-                <button type="button" onClick={() => applyAndPushNav({ obPage: "list", selectedObSlipId: null })}>
-                  Back to slip queue
-                </button>
-              </article>
-            )}
+            </div>
           </section>
         )}
 
@@ -1655,6 +1503,8 @@ function App() {
               setCalendarShowArchived={setCalendarShowArchived}
               eventSummary={eventSummary}
               filteredEvents={filteredEvents}
+              eventViewId={eventViewId}
+              setEventViewId={setEventViewId}
               setEditingEventId={setEditingEventId}
               setNewEvent={setNewEvent}
               setModalType={setModalType}
@@ -1706,12 +1556,21 @@ function App() {
                         value={employeeSearch}
                         onChange={(e) => setEmployeeSearch(e.target.value)}
                       />
-                      <select value={employeeFilter} onChange={(e) => setEmployeeFilter(e.target.value)}>
+                      <select
+                        className="mp-select"
+                        value={employeeFilter}
+                        onChange={(e) => setEmployeeFilter(e.target.value)}
+                      >
                         <option value="all">All Employees</option>
                         <option value="full-time">Full-Time</option>
                         <option value="part-time">Part-Time</option>
                       </select>
-                      <select value={employeeSort} onChange={(e) => setEmployeeSort(e.target.value)} aria-label="Sort employees">
+                      <select
+                        className="mp-select"
+                        value={employeeSort}
+                        onChange={(e) => setEmployeeSort(e.target.value)}
+                        aria-label="Sort employees"
+                      >
                         <option value="az">Sort: A-Z</option>
                         <option value="za">Sort: Z-A</option>
                       </select>
@@ -2010,7 +1869,7 @@ function App() {
       {modalType === "task" && (
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
-            <h3>{editingTaskId ? "Edit batch" : "Add batch"}</h3>
+            <h3>{editingTaskId ? "Edit task" : "Add task"}</h3>
             <form
               className="modal-form modal-form--compact"
               onSubmit={async (e) => {
@@ -2019,22 +1878,34 @@ function App() {
                   if (editingTaskId) {
                     await patchData(`/tasks/${editingTaskId}`, {
                       title: newTask.title,
-                      batchDate: newTask.batchDate,
+                      dateFrom: newTask.dateFrom,
+                      dateTo: newTask.dateTo,
+                      assignee: newTask.assignee,
+                      notes: newTask.notes,
+                      status: newTask.status,
                     });
                   } else {
-                    await postData("/tasks", newTask);
+                    await postData("/tasks", {
+                      title: newTask.title,
+                      dateFrom: newTask.dateFrom,
+                      dateTo: newTask.dateTo,
+                      assignee: newTask.assignee,
+                      notes: newTask.notes,
+                    });
                   }
                   closeModal();
                   setNewTask({
-                    title: dayjs().format("YYYY-MM-DD"),
-                    assignedStaff: "",
-                    note: "",
-                    batchDate: dayjs().format("YYYY-MM-DD"),
+                    title: "",
+                    dateFrom: dayjs().format("YYYY-MM-DD"),
+                    dateTo: dayjs().format("YYYY-MM-DD"),
+                    assignee: "",
+                    notes: "",
+                    status: "In Progress",
                   });
                   await loadAll();
                 } catch (err) {
                   const message = String(err?.message || "");
-                  let userMessage = "Unable to save batch. Check title/date and try again.";
+                  let userMessage = "Unable to save task. Check fields and try again.";
                   try {
                     const parsed = JSON.parse(message);
                     if (parsed?.error) userMessage = parsed.error;
@@ -2045,100 +1916,446 @@ function App() {
                 }
               }}
             >
+              <div className="modal-field">
+                <label htmlFor="task-title">Task name / title</label>
+                <input
+                  id="task-title"
+                  value={newTask.title}
+                  onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                  maxLength={120}
+                  required
+                />
+              </div>
               <div className="modal-field-row">
                 <div className="modal-field">
-                  <label htmlFor="task-batch-date">Batch date</label>
+                  <label htmlFor="task-df">Date from</label>
                   <input
-                    id="task-batch-date"
+                    id="task-df"
                     type="date"
-                    value={newTask.batchDate}
-                    onChange={(e) => setNewTask({ ...newTask, batchDate: e.target.value })}
+                    value={newTask.dateFrom}
+                    onChange={(e) => setNewTask({ ...newTask, dateFrom: e.target.value })}
                     required
                   />
                 </div>
                 <div className="modal-field">
-                  <label htmlFor="task-title">Title</label>
+                  <label htmlFor="task-dt">Date to</label>
                   <input
-                    id="task-title"
-                    value={newTask.title}
-                    onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
-                    maxLength={80}
+                    id="task-dt"
+                    type="date"
+                    value={newTask.dateTo}
+                    onChange={(e) => setNewTask({ ...newTask, dateTo: e.target.value })}
                     required
                   />
                 </div>
               </div>
-              {!editingTaskId && (
-                <>
-                  <div className="modal-field">
-                    <label htmlFor="task-staff">Assigned staff</label>
-                    <select
-                      id="task-staff"
-                      value={newTask.assignedStaff}
-                      onChange={(e) => setNewTask({ ...newTask, assignedStaff: e.target.value })}
-                    >
-                      <option value="">Unassigned</option>
-                      {employeesSorted.map((emp) => (
-                        <option key={emp.id} value={emp.name}>
-                          {emp.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="modal-field modal-field--task-note">
-                    <label htmlFor="task-note">Note</label>
-                    <textarea
-                      id="task-note"
-                      rows={5}
-                      placeholder="Initial handoff, courier, or other details…"
-                      value={newTask.note}
-                      onChange={(e) => setNewTask({ ...newTask, note: e.target.value })}
-                      maxLength={240}
-                    />
-                  </div>
-                </>
+              <div className="modal-field">
+                <label htmlFor="task-emp-select">Employee</label>
+                <select
+                  id="task-emp-select"
+                  className="mp-select"
+                  value={taskAssigneePick === "manual" ? "manual" : taskAssigneePick}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "") {
+                      setTaskAssigneePick("");
+                      setNewTask((p) => ({ ...p, assignee: "" }));
+                    } else if (v === "manual") {
+                      setTaskAssigneePick("manual");
+                    } else {
+                      const emp = employeesSorted.find((x) => x.id === v);
+                      setTaskAssigneePick(v);
+                      setNewTask((p) => ({ ...p, assignee: emp?.name || "" }));
+                    }
+                  }}
+                >
+                  <option value="">Choose an employee…</option>
+                  {employeesSorted.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                  <option value="manual">Other — type a name below</option>
+                </select>
+                {taskAssigneePick === "manual" ? (
+                  <input
+                    id="task-assignee-manual"
+                    className="task-employee-manual-input"
+                    type="text"
+                    value={newTask.assignee}
+                    onChange={(e) => setNewTask({ ...newTask, assignee: e.target.value })}
+                    placeholder="Enter assignee name"
+                    maxLength={120}
+                    aria-label="Assignee name (manual entry)"
+                  />
+                ) : null}
+                <p className="modal-hint">Use the roster, or Other to type a custom name.</p>
+              </div>
+              {editingTaskId ? (
+                <div className="modal-field">
+                  <label htmlFor="task-status">Status</label>
+                  <select
+                    id="task-status"
+                    className="mp-select"
+                    value={newTask.status}
+                    onChange={(e) => setNewTask({ ...newTask, status: e.target.value })}
+                  >
+                    {TASK_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="modal-hint">New tasks are created as &quot;In Progress&quot;.</p>
               )}
-              {editingTaskId && <p className="modal-hint">Stage updates stay on the batch detail view.</p>}
+              <div className="modal-field modal-field--task-note">
+                <label htmlFor="task-notes">Notes</label>
+                <textarea
+                  id="task-notes"
+                  rows={5}
+                  placeholder="Details, links, or context…"
+                  value={newTask.notes}
+                  onChange={(e) => setNewTask({ ...newTask, notes: e.target.value })}
+                  maxLength={2000}
+                />
+              </div>
               {taskModalError && <p className="form-error">{taskModalError}</p>}
               <div className="modal-actions">
                 <button type="button" onClick={closeModal}>
                   Cancel
                 </button>
-                <button type="submit">{editingTaskId ? "Save changes" : "Add batch"}</button>
+                <button type="submit">{editingTaskId ? "Save changes" : "Create task"}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {showFinalStepConfirm && selectedTask && (
-        <div className="modal-backdrop" onClick={() => setShowFinalStepConfirm(false)}>
-          <div className="modal modal--compact final-submit-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="final-submit-head">
-              <span className="final-step-check" aria-hidden="true">✓</span>
-              <div>
-                <h3>Confirm final submission</h3>
-                <p className="modal-hint">One last check before marking this batch as done.</p>
+      {modalType === "taskView" && viewingTask && (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
+            <h3>Task details</h3>
+            <div className="modal-form modal-form--compact task-view-readonly-form">
+              <div className="modal-field">
+                <label htmlFor="task-view-title">Task name / title</label>
+                <input id="task-view-title" readOnly className="task-field-readonly" value={viewingTask.title} />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="task-view-df">Date from</label>
+                  <input id="task-view-df" readOnly className="task-field-readonly" type="date" value={viewingTask.dateFrom || ""} />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="task-view-dt">Date to</label>
+                  <input id="task-view-dt" readOnly className="task-field-readonly" type="date" value={viewingTask.dateTo || ""} />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="task-view-assignee">Employee</label>
+                <input
+                  id="task-view-assignee"
+                  readOnly
+                  className="task-field-readonly"
+                  value={viewingTask.assignee || ""}
+                  placeholder="—"
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="task-view-stage">Stage</label>
+                <input
+                  id="task-view-stage"
+                  readOnly
+                  className="task-field-readonly"
+                  value={TASK_STAGES[Number(viewingTask.currentStage ?? 0)] || "In Progress"}
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="task-view-status">Status</label>
+                <input
+                  id="task-view-status"
+                  readOnly
+                  className="task-field-readonly"
+                  value={viewingTask.status || "In Progress"}
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="task-view-updated">Last updated</label>
+                <input
+                  id="task-view-updated"
+                  readOnly
+                  className="task-field-readonly"
+                  value={viewingTask.updatedAt ? dayjs(viewingTask.updatedAt).format("MMM D, YYYY h:mm A") : "—"}
+                />
+              </div>
+              <div className="modal-field modal-field--task-note">
+                <label htmlFor="task-view-notes">Notes</label>
+                <textarea
+                  id="task-view-notes"
+                  readOnly
+                  className="task-field-readonly"
+                  rows={5}
+                  value={viewingTask.notes?.trim() ? viewingTask.notes : ""}
+                  placeholder="No notes."
+                />
+              </div>
+              {viewingTask.archived ? <p className="modal-hint">This task is archived.</p> : null}
+              <div className="modal-actions modal-actions--task-view">
+                {!viewingTask.archived && Number(viewingTask.currentStage ?? 0) < TASK_STAGES.length - 1 ? (
+                  <button type="button" className="btn-crud" onClick={() => advanceTaskStage(viewingTask.id)}>
+                    Advance to {TASK_STAGES[Number(viewingTask.currentStage ?? 0) + 1]}
+                  </button>
+                ) : null}
+                <button type="button" onClick={closeModal}>
+                  Close
+                </button>
               </div>
             </div>
-            <div className="final-submit-body">
-              <p>
-                Batch: <strong>{selectedTask.title}</strong>
-              </p>
-              <p>
-                Target step: <strong>Final Filing</strong>
-              </p>
+          </div>
+        </div>
+      )}
+
+      {modalType === "obSlipView" && viewingObSlip && (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
+            <h3>OB slip details</h3>
+            <div className="modal-form modal-form--compact task-view-readonly-form">
+              <div className="modal-field">
+                <label htmlFor="ob-view-name">Name</label>
+                <input id="ob-view-name" readOnly className="task-field-readonly" value={viewingObSlip.name || ""} />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ob-view-date">Date</label>
+                  <input
+                    id="ob-view-date"
+                    readOnly
+                    className="task-field-readonly"
+                    type="date"
+                    value={viewingObSlip.date || ""}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ob-view-dept">Department</label>
+                  <input
+                    id="ob-view-dept"
+                    readOnly
+                    className="task-field-readonly"
+                    value={viewingObSlip.department || "COMELEC"}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ob-view-pos">Position</label>
+                <input id="ob-view-pos" readOnly className="task-field-readonly" value={viewingObSlip.position || ""} />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ob-view-purpose">Purpose</label>
+                <textarea
+                  id="ob-view-purpose"
+                  readOnly
+                  className="task-field-readonly"
+                  rows={3}
+                  value={viewingObSlip.purpose || ""}
+                  placeholder="—"
+                />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ob-view-ti">Time in</label>
+                  <input
+                    id="ob-view-ti"
+                    readOnly
+                    className="task-field-readonly"
+                    type="time"
+                    value={viewingObSlip.timeIn || ""}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ob-view-to">Time out</label>
+                  <input
+                    id="ob-view-to"
+                    readOnly
+                    className="task-field-readonly"
+                    type="time"
+                    value={viewingObSlip.timeOut || ""}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ob-view-emp">Linked employee (roster)</label>
+                <input
+                  id="ob-view-emp"
+                  readOnly
+                  className="task-field-readonly"
+                  value={
+                    viewingObSlip.employeeId
+                      ? employeesSorted.find((e) => e.id === viewingObSlip.employeeId)?.name || "—"
+                      : "—"
+                  }
+                  placeholder="—"
+                />
+              </div>
+              {viewingObSlip.archived ? <p className="modal-hint">This slip is archived.</p> : null}
+              <div className="modal-actions modal-actions--task-view">
+                <button type="button" onClick={closeModal}>
+                  Close
+                </button>
+              </div>
             </div>
-            <div className="modal-actions final-submit-actions">
-              <button type="button" className="final-cancel-btn" onClick={() => setShowFinalStepConfirm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {modalType === "eventView" && viewingEvent && (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
+            <h3>Event details</h3>
+            <div className="modal-form modal-form--compact task-view-readonly-form">
+              <div className="modal-field">
+                <label htmlFor="ev-view-title">Event title</label>
+                <input id="ev-view-title" readOnly className="task-field-readonly" value={viewingEvent.title || ""} />
+              </div>
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="ev-view-date">Date</label>
+                  <input
+                    id="ev-view-date"
+                    readOnly
+                    className="task-field-readonly"
+                    type="date"
+                    value={viewingEvent.date || ""}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="ev-view-time">Time</label>
+                  <input
+                    id="ev-view-time"
+                    readOnly
+                    className="task-field-readonly"
+                    type="time"
+                    value={viewingEvent.time || "09:00"}
+                  />
+                </div>
+              </div>
+              <div className="modal-field modal-field--task-note">
+                <label htmlFor="ev-view-desc">Description</label>
+                <textarea
+                  id="ev-view-desc"
+                  readOnly
+                  className="task-field-readonly"
+                  rows={4}
+                  value={viewingEvent.description?.trim() ? viewingEvent.description : ""}
+                  placeholder="No description."
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="ev-view-status">Status</label>
+                <input
+                  id="ev-view-status"
+                  readOnly
+                  className="task-field-readonly"
+                  value={viewingEvent.archived ? "Archived" : "Scheduled"}
+                />
+              </div>
+              {viewingEvent.archived ? <p className="modal-hint">This event is archived.</p> : null}
+              <div className="modal-actions modal-actions--task-view">
+                <button type="button" onClick={closeModal}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {taskPrintOpen && (
+        <div className="modal-backdrop" onClick={() => setTaskPrintOpen(false)}>
+          <div className="modal modal--compact" onClick={(e) => e.stopPropagation()}>
+            <h3>Print task list</h3>
+            <p className="modal-hint">
+              Only tasks whose date range overlaps your selected period are included. Filters apply together.
+            </p>
+            <div className="modal-form modal-form--compact">
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <label htmlFor="print-t-from">From</label>
+                  <input
+                    id="print-t-from"
+                    type="date"
+                    value={printTaskRange.from}
+                    onChange={(e) => setPrintTaskRange((p) => ({ ...p, from: e.target.value }))}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="print-t-to">To</label>
+                  <input
+                    id="print-t-to"
+                    type="date"
+                    value={printTaskRange.to}
+                    onChange={(e) => setPrintTaskRange((p) => ({ ...p, to: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="print-t-emp">Employee</label>
+                <select
+                  id="print-t-emp"
+                  className="mp-select"
+                  value={printTaskRange.employeeId}
+                  onChange={(e) => setPrintTaskRange((p) => ({ ...p, employeeId: e.target.value }))}
+                >
+                  <option value="all">All employees</option>
+                  {employeesSorted.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="print-t-status">Status</label>
+                <select
+                  id="print-t-status"
+                  className="mp-select"
+                  value={printTaskRange.status}
+                  onChange={(e) => setPrintTaskRange((p) => ({ ...p, status: e.target.value }))}
+                >
+                  <option value="all">All statuses</option>
+                  {TASK_STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="modal-field">
+                <label htmlFor="print-t-archive">Tasks</label>
+                <select
+                  id="print-t-archive"
+                  className="mp-select"
+                  value={printTaskRange.archiveScope}
+                  onChange={(e) => setPrintTaskRange((p) => ({ ...p, archiveScope: e.target.value }))}
+                >
+                  <option value="active">Active only</option>
+                  <option value="all">Active + archived</option>
+                  <option value="archived">Archived only</option>
+                </select>
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button type="button" onClick={() => setTaskPrintOpen(false)}>
+                Cancel
+              </button>
               <button
                 type="button"
-                className="final-submit-btn"
+                className="task-tracker-add"
                 onClick={() => {
-                  setShowFinalStepConfirm(false);
-                  advanceTask(selectedTask.id);
+                  printTaskListSheet();
+                  setTaskPrintOpen(false);
                 }}
               >
-                Submit
+                Print
               </button>
             </div>
           </div>
@@ -2180,6 +2397,7 @@ function App() {
                 <label htmlFor="ob-modal-employee">Employee name</label>
                 <select
                   id="ob-modal-employee"
+                  className="mp-select"
                   value={newSlip.employeeId || ""}
                   onChange={(e) => {
                     const id = e.target.value;
@@ -2492,6 +2710,7 @@ function App() {
                   <label htmlFor="emp-type">Employment type</label>
                   <select
                     id="emp-type"
+                    className="mp-select"
                     value={newEmployee.type}
                     onChange={(e) => setNewEmployee({ ...newEmployee, type: e.target.value })}
                   >
