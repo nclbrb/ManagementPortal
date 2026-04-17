@@ -63,9 +63,21 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "5mb" }));
 
 const TASK_STATUSES = ["In Progress", "Completed", "Cancelled", "On Hold"];
+const TASK_STAGES = [
+  "Collected",
+  "For Verification",
+  "For Correction",
+  "Organized by Precinct (Alphabetical)",
+  "For Approval",
+  "Final Filing",
+];
 
 function isValidStatus(s) {
   return TASK_STATUSES.includes(String(s || ""));
+}
+
+function isValidStageIndex(stage) {
+  return Number.isInteger(stage) && stage >= 0 && stage < TASK_STAGES.length;
 }
 
 const db = {
@@ -310,6 +322,7 @@ function emitRealtime() {
     dashboard: getDashboardData(),
     tasks: {
       statuses: TASK_STATUSES,
+      stages: TASK_STAGES,
       items: db.data.tasks,
       logs: db.data.taskLogs || [],
     },
@@ -337,14 +350,34 @@ function getDashboardData() {
     { total: 0, inProgress: 0, completed: 0, pending: 0 }
   );
 
-  const tasksByStage = [];
+  const byStage = TASK_STAGES.map((label, stageIndex) => ({
+    stageIndex,
+    label,
+    count: activeTasks.filter((t) => Number(t.currentStage ?? 0) === stageIndex).length,
+  }));
+
+  const totalTasks = taskTotals.total || 1;
+  const tasksByStage = byStage.map((row) => ({
+    ...row,
+    pct: Math.round((row.count / totalTasks) * 1000) / 10,
+  }));
 
   const completionRate =
     taskTotals.total > 0 ? Math.round((taskTotals.completed / taskTotals.total) * 1000) / 10 : 0;
 
-  const avgPipelinePct = completionRate;
+  const avgPipelinePct =
+    activeTasks.length > 0
+      ? Math.round(
+          (activeTasks.reduce((sum, task) => {
+            const stageIndex = Math.min(Math.max(Number(task.currentStage ?? 0), 0), TASK_STAGES.length - 1);
+            return sum + (stageIndex + 1) / TASK_STAGES.length;
+          }, 0) /
+            activeTasks.length) *
+            1000
+        ) / 10
+      : 0;
 
-  const inCorrection = 0;
+  const inCorrection = activeTasks.filter((t) => Number(t.currentStage ?? 0) === 2).length;
 
   const employeesByType = db.data.employees.reduce(
     (acc, e) => {
@@ -384,11 +417,12 @@ function getDashboardData() {
   const activityFeed = [];
   for (const task of db.data.tasks || []) {
     if (task.archived) continue;
+    const stageIndex = Math.min(Math.max(Number(task.currentStage ?? 0), 0), TASK_STAGES.length - 1);
     activityFeed.push({
       id: `${task.id}-activity`,
       batchTitle: task.title,
-      stageLabel: task.status || "In Progress",
-      stageIndex: 0,
+      stageLabel: TASK_STAGES[stageIndex] || task.status || "In Progress",
+      stageIndex,
       at: task.updatedAt || task.createdAt,
       note: (task.notes || "").slice(0, 160),
       assignedStaff: task.assignee || "",
@@ -402,6 +436,12 @@ function getDashboardData() {
     insights.push({
       type: "positive",
       text: `${completionRate}% of active tasks are completed.`,
+    });
+  }
+  if (inCorrection > 0) {
+    insights.push({
+      type: "warning",
+      text: `${inCorrection} task${inCorrection > 1 ? "s" : ""} in Correction — review before advancing.`,
     });
   }
   const todayHolidayCount = holidayRows.filter((h) => h.date === today).length;
@@ -823,7 +863,7 @@ app.post("/api/ob-slips/import-excel", upload.single("file"), async (req, res) =
 
 app.get("/api/tasks", async (_req, res) => {
   await db.read();
-  res.json({ statuses: TASK_STATUSES, items: db.data.tasks, logs: db.data.taskLogs || [] });
+  res.json({ statuses: TASK_STATUSES, stages: TASK_STAGES, items: db.data.tasks, logs: db.data.taskLogs || [] });
 });
 
 app.post("/api/tasks", async (req, res) => {
@@ -853,12 +893,22 @@ app.post("/api/tasks", async (req, res) => {
     assignee: String(assignee || "").trim(),
     status: st,
     notes: String(notes || "").trim(),
+    currentStage: 0,
+    updates: [
+      {
+        stage: 0,
+        status: "done",
+        assignedStaff: String(assignee || "").trim() || "Unassigned",
+        note: String(notes || "").trim(),
+        at: now,
+      },
+    ],
     archived: false,
     createdAt: now,
     updatedAt: now,
   };
   db.data.tasks.push(task);
-  pushTaskLog("task-created", task, { status: task.status });
+  pushTaskLog("task-created", task, { status: task.status, stage: 0 });
   await db.write();
   emitRealtime();
   res.status(201).json(task);
@@ -906,6 +956,46 @@ app.patch("/api/tasks/:id", async (req, res) => {
     dateTo: task.dateTo,
     status: task.status,
     archived: task.archived,
+  });
+  await db.write();
+  emitRealtime();
+  res.json(task);
+});
+
+app.patch("/api/tasks/:id/stage", async (req, res) => {
+  await db.read();
+  const task = db.data.tasks.find((t) => t.id === req.params.id);
+  if (!task) return res.status(404).json({ error: "Task not found." });
+  const nextStage = Number(req.body.stage);
+  if (!isValidStageIndex(nextStage)) {
+    return res.status(400).json({ error: "Invalid stage." });
+  }
+  const currentStage = Number(task.currentStage ?? 0);
+  const isForwardStep = nextStage === currentStage + 1;
+  const isCorrectionLoop = currentStage === 2 && nextStage === 1;
+  if (!isForwardStep && !isCorrectionLoop) {
+    return res.status(400).json({ error: "Invalid transition. Only next stage is allowed (or Correction back to Verification)." });
+  }
+  const assignedStaff = String(req.body.assignedStaff || task.assignee || "").trim() || "Assigned Staff";
+  const note = String(req.body.note || "").trim();
+  task.currentStage = nextStage;
+  task.updates = Array.isArray(task.updates) ? task.updates : [];
+  task.updates.push({
+    stage: nextStage,
+    status: nextStage === TASK_STAGES.length - 1 ? "done" : "in-progress",
+    assignedStaff,
+    note,
+    at: new Date().toISOString(),
+  });
+  task.updatedAt = new Date().toISOString();
+  if (nextStage === TASK_STAGES.length - 1) {
+    task.status = "Completed";
+  }
+  pushTaskLog("stage-updated", task, {
+    stage: nextStage,
+    stageLabel: TASK_STAGES[nextStage],
+    assignedStaff,
+    note,
   });
   await db.write();
   emitRealtime();

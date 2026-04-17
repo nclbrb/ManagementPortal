@@ -5,7 +5,7 @@ import { SOCKET_URL, apiUrl, AUTH_STORAGE_KEY, getAuthHeaders } from "./apiConfi
 import comelecLogo from "./assets/comelec.png";
 import { jsonFetch } from "./lib/jsonFetch.js";
 import { COMELEC_NAV_KEY, initialAppNav, normalizeNav, tabs } from "./lib/navStore.js";
-import { TASK_STATUSES } from "./lib/taskConstants.js";
+import { TASK_STATUSES, TASK_STAGES } from "./lib/taskConstants.js";
 import { buildTaskListPrintHtml } from "./tasks/buildTaskListPrintHtml.js";
 import { staffInitials } from "./lib/strings.js";
 import { buildObSlipPrintHtml } from "./obSlip/printObSlipHtml.js";
@@ -17,7 +17,7 @@ import { EventSection } from "./components/EventSection.jsx";
 function App() {
   const [activeTab, setActiveTab] = useState(() => initialAppNav?.tab ?? "Dashboard");
   const [dashboard, setDashboard] = useState(null);
-  const [tasksData, setTasksData] = useState({ statuses: TASK_STATUSES, items: [], logs: [] });
+  const [tasksData, setTasksData] = useState({ statuses: TASK_STATUSES, stages: TASK_STAGES, items: [], logs: [] });
   const [employees, setEmployees] = useState([]);
   const [events, setEvents] = useState([]);
   const [obSlips, setObSlips] = useState([]);
@@ -194,7 +194,7 @@ function App() {
       }
       setBackendOffline(true);
       setDashboard(null);
-      setTasksData({ statuses: TASK_STATUSES, items: [], logs: [] });
+      setTasksData({ statuses: TASK_STATUSES, stages: TASK_STAGES, items: [], logs: [] });
       setEmployees([]);
       setEvents([]);
       setObSlips([]);
@@ -241,6 +241,7 @@ function App() {
       if (payload.tasks && typeof payload.tasks === "object" && Array.isArray(payload.tasks.items)) {
         setTasksData({
           statuses: Array.isArray(payload.tasks.statuses) ? payload.tasks.statuses : TASK_STATUSES,
+          stages: Array.isArray(payload.tasks.stages) ? payload.tasks.stages : TASK_STAGES,
           items: payload.tasks.items,
           logs: Array.isArray(payload.tasks.logs) ? payload.tasks.logs : [],
         });
@@ -431,6 +432,25 @@ function App() {
     if (!a) return "";
     const match = employeesSorted.find((e) => String(e.name || "").trim().toLowerCase() === a);
     return match ? match.id : "manual";
+  };
+
+  const advanceTaskStage = async (taskId) => {
+    if (!taskId) return;
+    try {
+      const task = tasksData.items.find((t) => t.id === taskId);
+      if (!task) return;
+      const currentStage = Number(task.currentStage ?? 0);
+      const nextStage = Math.min(currentStage + 1, TASK_STAGES.length - 1);
+      await patchData(`/tasks/${taskId}/stage`, {
+        stage: nextStage,
+        assignedStaff: task.assignee || "",
+        note: `Stage advanced to ${TASK_STAGES[nextStage]}`,
+      });
+      await loadAll();
+      setBackendOffline(false);
+    } catch {
+      setBackendOffline(true);
+    }
   };
 
   const filteredEmployees = useMemo(
@@ -2042,6 +2062,15 @@ function App() {
                 />
               </div>
               <div className="modal-field">
+                <label htmlFor="task-view-stage">Stage</label>
+                <input
+                  id="task-view-stage"
+                  readOnly
+                  className="task-field-readonly"
+                  value={TASK_STAGES[Number(viewingTask.currentStage ?? 0)] || "In Progress"}
+                />
+              </div>
+              <div className="modal-field">
                 <label htmlFor="task-view-status">Status</label>
                 <input
                   id="task-view-status"
@@ -2072,6 +2101,11 @@ function App() {
               </div>
               {viewingTask.archived ? <p className="modal-hint">This task is archived.</p> : null}
               <div className="modal-actions modal-actions--task-view">
+                {!viewingTask.archived && Number(viewingTask.currentStage ?? 0) < TASK_STAGES.length - 1 ? (
+                  <button type="button" className="btn-crud" onClick={() => advanceTaskStage(viewingTask.id)}>
+                    Advance to {TASK_STAGES[Number(viewingTask.currentStage ?? 0) + 1]}
+                  </button>
+                ) : null}
                 <button type="button" onClick={closeModal}>
                   Close
                 </button>
