@@ -448,7 +448,8 @@ button:active {
 .dash-simple {
   display: grid;
   gap: 26px;
-  max-width: 1260px;
+  width: 100%;
+  max-width: none;
 }
 
 /* Dashboard overview banner */
@@ -809,7 +810,7 @@ button:active {
   color: var(--mp-text-muted);
   font-weight: 700;
   margin-left: auto;
-  margin-right: 5%;
+  margin-right: 0;
 }
 .dash-pipe-filter-wrap select {
   min-height: 30px;
@@ -877,7 +878,7 @@ button:active {
 
 .dash-main-grid {
   display: grid;
-  grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 470px) minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -1096,7 +1097,7 @@ button:active {
   border-radius: 18px;
   background: linear-gradient(180deg, var(--mp-surface-elevated) 0%, var(--mp-surface-card) 100%);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
-  height: 206px;
+  min-height: 206px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1207,7 +1208,7 @@ button:active {
   border-radius: 18px;
   background: linear-gradient(180deg, var(--mp-surface-elevated) 0%, var(--mp-surface-card) 100%);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.25);
-  height: 206px;
+  min-height: 206px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1338,7 +1339,60 @@ button:active {
   }
 }
 
+@media (max-width: 960px) {
+  .dash-panel-day,
+  .dash-panel-recent {
+    min-height: 0;
+  }
+
+  .dash-day-scroll,
+  .dash-recent-scroll {
+    height: auto;
+    min-height: 0;
+    max-height: 220px;
+  }
+}
+
 @media (max-width: 640px) {
+  .dash-simple {
+    gap: 18px;
+  }
+
+  .dash-main-grid {
+    gap: 16px;
+  }
+
+  .dash-overview {
+    border-radius: 16px;
+  }
+
+  .dash-cal-panel .dash-cal-head {
+    padding: 12px 10px 10px;
+  }
+
+  .dash-cal-weekdays {
+    padding: 0 10px 6px;
+  }
+
+  .dash-cal-legend-note {
+    padding: 0 10px 8px;
+  }
+
+  .dash-cal-grid {
+    padding: 0 10px 12px;
+    gap: 5px;
+  }
+
+  .dash-cal-cell {
+    min-height: 32px;
+    border-radius: 8px;
+    padding: 4px 2px;
+  }
+
+  .dash-pipe-kpis {
+    grid-template-columns: 1fr;
+  }
+
   .dash-stats-row {
     grid-template-columns: 1fr;
   }

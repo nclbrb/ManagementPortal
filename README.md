@@ -54,3 +54,30 @@ npm run build
 ```
 
 Serve the `frontend/dist` folder with any static host; point `VITE_API_BASE_URL` / `VITE_SOCKET_URL` at your deployed API.
+
+## Build Windows `.exe` (Desktop App)
+
+This project can be packaged as a standalone desktop app for a COMELEC PC.
+
+1. Install root packaging dependencies:
+
+   ```bash
+   cd D:\ManagementPortal
+   npm install
+   ```
+
+2. Build installer:
+
+   ```bash
+   npm run desktop:dist
+   ```
+
+3. Output installer:
+
+   - `release/COMELEC Management Portal Setup 1.0.0.exe`
+
+### Desktop runtime notes
+
+- Frontend and backend are bundled in one app.
+- Local API runs automatically on `http://localhost:4000`.
+- SQLite database is stored in the Windows user profile (`AppData`) so updates do not overwrite data.
