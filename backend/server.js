@@ -52,7 +52,10 @@ const io = new Server(httpServer, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 4000;
 const SQLITE_PATH = process.env.SQLITE_PATH || path.join(__dirname, "comelec.db");
 const LEGACY_JSON_PATH = path.join(__dirname, "data.json");
-const uploadsDir = path.join(__dirname, "uploads");
+const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 const upload = multer({ dest: uploadsDir });
 
 // Allow browser dev servers (Vite, preview, etc.) — reflect request Origin
@@ -307,7 +310,11 @@ async function bootstrap() {
 function emitRealtime() {
   io.emit("realtime:update", {
     dashboard: getDashboardData(),
-    tasks: db.data.tasks,
+    tasks: {
+      stages: taskStages,
+      items: db.data.tasks,
+      logs: db.data.taskLogs || [],
+    },
     employees: db.data.employees,
     events: db.data.events,
     obSlips: db.data.obSlips,
@@ -843,11 +850,6 @@ app.post("/api/tasks", async (req, res) => {
   if (!title || !String(title).trim()) {
     return res.status(400).json({ error: "Batch name is required." });
   }
-  const titleNorm = String(title).trim().toLowerCase();
-  const titleTaken = db.data.tasks.some((t) => String(t.title || "").trim().toLowerCase() === titleNorm);
-  if (titleTaken) {
-    return res.status(400).json({ error: "A batch with this title already exists. Use a unique name." });
-  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(batchDate))) {
     return res.status(400).json({ error: "Batch date must be in YYYY-MM-DD format." });
   }
@@ -879,11 +881,6 @@ app.patch("/api/tasks/:id", async (req, res) => {
   if (title !== undefined) {
     const t = String(title).trim();
     if (!t) return res.status(400).json({ error: "Title cannot be empty." });
-    const tNorm = t.toLowerCase();
-    const taken = db.data.tasks.some((x) => x.id !== task.id && String(x.title || "").trim().toLowerCase() === tNorm);
-    if (taken) {
-      return res.status(400).json({ error: "A batch with this title already exists. Use a unique name." });
-    }
     task.title = t;
   }
   if (batchDate !== undefined) {

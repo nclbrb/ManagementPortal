@@ -1,0 +1,60 @@
+{
+  "name": "comelec-management-portal-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "COMELEC management portal desktop package",
+  "author": "COMELEC",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "desktop:build:frontend": "npm --prefix frontend run build",
+    "desktop:start": "npm run desktop:build:frontend && electron .",
+    "desktop:dist": "npm run desktop:build:frontend && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "date-holidays": "^3.26.12",
+    "dayjs": "^1.11.20",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "socket.io": "^4.8.3",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ph.comelec.managementportal",
+    "productName": "COMELEC Management Portal",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!comelec.db",
+          "!comelec.db-shm",
+          "!comelec.db-wal",
+          "!data.sqlite",
+          "!node_modules/.cache/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

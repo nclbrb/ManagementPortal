@@ -221,7 +221,13 @@ function App() {
     socket.on("connect_error", () => setBackendOffline(true));
     socket.on("realtime:update", (payload) => {
       setDashboard(payload.dashboard);
-      setTasksData((prev) => ({ ...prev, items: payload.tasks }));
+      if (payload.tasks && typeof payload.tasks === "object" && Array.isArray(payload.tasks.items)) {
+        setTasksData({
+          stages: Array.isArray(payload.tasks.stages) ? payload.tasks.stages : [],
+          items: payload.tasks.items,
+          logs: Array.isArray(payload.tasks.logs) ? payload.tasks.logs : [],
+        });
+      }
       setEmployees(payload.employees);
       setEvents(payload.events);
       setObSlips(payload.obSlips);
@@ -951,6 +957,8 @@ function App() {
             holidays={holidays}
             employees={employees}
             taskLogs={tasksData.logs || []}
+            taskItems={tasksData.items || []}
+            taskStages={tasksData.stages || []}
             userDisplayName={userDisplayName}
             onNavigate={selectTab}
           />
