@@ -14,6 +14,7 @@ React frontend + Node.js backend (separate folders).
 
    You should see: `Backend running at http://localhost:4000`
 
+
 2. **Terminal B — frontend** (Vite, port **5173**):
 
    ```bash
